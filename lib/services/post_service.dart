@@ -12,7 +12,8 @@ import 'api_service.dart';
 
 class PostService {
   // static const String baseUrl = 'http://10.0.2.2:3100/api';
-  static const String baseUrl = 'https://zpost.kbunet.net/api';
+  // static const String baseUrl = 'https://zpost.kbunet.net/api';
+  static const String baseUrl = 'http://localhost:3050/api';
   
   // Get auth headers
   static Future<Map<String, String>> _getHeaders() async {
@@ -249,15 +250,40 @@ class PostService {
   // Download media file
   static Future<Uint8List> downloadMedia(String mediaPath) async {
     try {
-      debugPrint('Downloading media from: $baseUrl/posts/media/$mediaPath');
+      // Check if the mediaPath is already a full URL
+      final Uri mediaUri;
+      if (mediaPath.startsWith('http')) {
+        mediaUri = Uri.parse(mediaPath);
+      } else {
+        // The API endpoint might be expecting media in a different location
+        // Try multiple possible paths
+        mediaUri = Uri.parse('$baseUrl/media/$mediaPath');
+      }
+      
+      debugPrint('Downloading media from: $mediaUri');
       final response = await http.get(
-        Uri.parse('$baseUrl/posts/media/$mediaPath'),
+        mediaUri,
         headers: await _getHeaders(),
       );
 
       if (response.statusCode != 200) {
         debugPrint('Failed to download media: ${response.statusCode} - ${response.body}');
-        throw Exception('Failed to download media file');
+        
+        // If the first attempt fails, try an alternative path
+        final alternativeUri = Uri.parse('$baseUrl/posts/media/$mediaPath');
+        debugPrint('Retrying with alternative path: $alternativeUri');
+        
+        final alternativeResponse = await http.get(
+          alternativeUri,
+          headers: await _getHeaders(),
+        );
+        
+        if (alternativeResponse.statusCode != 200) {
+          debugPrint('Alternative path also failed: ${alternativeResponse.statusCode} - ${alternativeResponse.body}');
+          throw Exception('Failed to download media file');
+        }
+        
+        return alternativeResponse.bodyBytes;
       }
 
       return response.bodyBytes;

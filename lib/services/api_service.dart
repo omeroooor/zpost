@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -9,8 +11,8 @@ import '../models/supporter.dart';
 
 class ApiService {
   // static const String baseUrl = 'http://10.0.2.2:3100/api';
-  static const String baseUrl = 'https://zpost.kbunet.net/api';
-  // static const String baseUrl = 'http://localhost:3050/api';
+  // static const String baseUrl = 'https://zpost.kbunet.net/api';
+  static const String baseUrl = 'http://localhost:3050/api';
   static AuthProvider? _authProvider;
 
   static void initialize(AuthProvider authProvider) {
@@ -226,18 +228,79 @@ class ApiService {
     return _handleMapResponse(response);
   }
 
-  static Future<Map<String, dynamic>> createPost(String content) async {
+  static Future<Map<String, dynamic>> createPost(String content, {dynamic mediaFile, String? mediaType, List<int>? mediaBytes, String? fileName}) async {
     final token = await getToken();
-    final response = await http.post(
-      Uri.parse('$baseUrl/posts'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'content': content,
-      }),
-    );
+
+    // If there's no media file, use the simple JSON request
+    if (mediaFile == null && mediaBytes == null) {
+      final response = await http.post(
+        Uri.parse('$baseUrl/posts'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'content': content,
+        }),
+      );
+
+      return _handleMapResponse(response);
+    }
+
+    // If there is a media file, use multipart request
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/posts'));
+
+    // Add authorization header
+    request.headers['Authorization'] = 'Bearer $token';
+
+    // Add text fields
+    request.fields['content'] = content;
+
+    // Add mediaPath field with the filename to match backend expectations
+    String mediaFilename = '';
+    if (fileName != null) {
+      mediaFilename = fileName;
+    } else if (mediaFile is File) {
+      mediaFilename = mediaFile.path.split('/').last;
+    }
+
+    if (mediaFilename.isNotEmpty) {
+      request.fields['mediaPath'] = mediaFilename;
+    }
+
+    // Add the media file
+    http.MultipartFile multipartFile;
+
+    if (mediaBytes != null && fileName != null) {
+      // For web platform
+      multipartFile = http.MultipartFile.fromBytes(
+        'media',
+        mediaBytes,
+        filename: fileName,
+        contentType: MediaType.parse(mediaType ?? 'application/octet-stream'),
+      );
+    } else if (mediaFile is File) {
+      // For mobile platforms
+      final mobileFileName = mediaFile.path.split('/').last;
+      final mediaStream = http.ByteStream(mediaFile.openRead());
+      final mediaLength = await mediaFile.length();
+      
+      multipartFile = http.MultipartFile(
+        'media',
+        mediaStream,
+        mediaLength,
+        filename: mobileFileName,
+        contentType: MediaType.parse(mediaType ?? 'application/octet-stream'),
+      );
+    } else {
+      throw Exception('Invalid media file format');
+    }
+
+    request.files.add(multipartFile);
+
+    // Send the request
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
 
     return _handleMapResponse(response);
   }

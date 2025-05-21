@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../models/post.dart';
@@ -77,9 +78,15 @@ class PostProvider with ChangeNotifier {
     }
   }
 
-  Future<Post> createPost(String content) async {
+  Future<Post> createPost(String content, {dynamic mediaFile, String? mediaType, List<int>? mediaBytes, String? fileName}) async {
     try {
-      final postData = await ApiService.createPost(content);
+      final postData = await ApiService.createPost(
+        content, 
+        mediaFile: mediaFile, 
+        mediaType: mediaType,
+        mediaBytes: mediaBytes,
+        fileName: fileName
+      );
       if (postData is! Map<String, dynamic>) {
         throw Exception('Invalid post data format');
       }

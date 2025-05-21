@@ -199,59 +199,113 @@ class PostCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Media content (image or video)
         if (post.mediaPath != null) ...[
-          FutureBuilder<Uint8List>(
-            future: PostService.downloadMedia(post.mediaPath!),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              
-              if (snapshot.hasError) {
-                debugPrint('Error loading media: ${snapshot.error}');
-                return Center(child: Text('Error loading media: ${snapshot.error}'));
-              }
-              
-              if (!snapshot.hasData) {
-                return const SizedBox();
-              }
-              
-              return Container(
-                constraints: const BoxConstraints(
-                  maxHeight: 300,
-                ),
-                width: double.infinity,
-                child: post.mediaType == 'video'
-                  ? VideoThumbnail(videoData: snapshot.data!)
-                  : Image.memory(
-                      snapshot.data!,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) {
-                        debugPrint('Error displaying image: $error');
-                        return const Center(
-                          child: Icon(
-                            Icons.error_outline,
-                            size: 48,
-                            color: Colors.red,
+          ClipRRect(
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(4),
+              topRight: Radius.circular(4),
+            ),
+            child: FutureBuilder<Uint8List>(
+              future: PostService.downloadMedia(post.mediaPath!),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Container(
+                    height: 200,
+                    width: double.infinity,
+                    color: Colors.grey[200],
+                    child: const Center(child: CircularProgressIndicator()),
+                  );
+                }
+                
+                if (snapshot.hasError) {
+                  debugPrint('Error loading media: ${snapshot.error}');
+                  return Container(
+                    height: 200,
+                    width: double.infinity,
+                    color: Colors.grey[100],
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 32),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Error loading media',
+                            style: TextStyle(color: Colors.grey[700]),
+                            textAlign: TextAlign.center,
                           ),
-                        );
-                      },
+                        ],
+                      ),
                     ),
-              );
-            },
+                  );
+                }
+                
+                if (!snapshot.hasData) {
+                  return const SizedBox();
+                }
+                
+                return Container(
+                  constraints: const BoxConstraints(
+                    minHeight: 200,
+                    maxHeight: 350,
+                  ),
+                  width: double.infinity,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.03),
+                  ),
+                  child: post.mediaType == 'video'
+                    ? VideoThumbnail(videoData: snapshot.data!)
+                    : Image.memory(
+                        snapshot.data!,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        errorBuilder: (context, error, stackTrace) {
+                          debugPrint('Error displaying image: $error');
+                          return const Center(
+                            child: Icon(
+                              Icons.error_outline,
+                              size: 48,
+                              color: Colors.red,
+                            ),
+                          );
+                        },
+                      ),
+                );
+              },
+            ),
           ),
-          const SizedBox(height: 12),
         ],
+        
+        // Post text content
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Text(
-            post.content,
-            style: Theme.of(context).textTheme.bodyLarge,
+          padding: const EdgeInsets.all(16.0),
+          child: Container(
+            width: double.infinity,
+            alignment: _isArabic(post.content) ? Alignment.centerRight : Alignment.centerLeft,
+            child: Directionality(
+              // Detect if the text is Arabic and set RTL direction accordingly
+              textDirection: _isArabic(post.content) ? TextDirection.rtl : TextDirection.ltr,
+              child: Text(
+                post.content,
+                style: Theme.of(context).textTheme.bodyLarge,
+                textAlign: _isArabic(post.content) ? TextAlign.right : TextAlign.left,
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 8),
       ],
     );
+  }
+
+  @override
+  // Helper method to detect if text is Arabic
+  bool _isArabic(String text) {
+    // Arabic Unicode block range: U+0600 to U+06FF
+    final arabicRegex = RegExp(r'[\u0600-\u06FF]');
+    return arabicRegex.hasMatch(text);
   }
 
   @override

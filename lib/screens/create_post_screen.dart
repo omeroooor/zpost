@@ -5,6 +5,7 @@ import '../services/post_service.dart';
 import '../providers/auth_provider.dart';
 import '../models/author.dart';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'dart:convert';
 import 'package:archive/archive.dart';
@@ -24,11 +25,44 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _isLoading = false;
   String? _error;
   String _importContent = '';
+  bool _isArabicContent = false;
+  
+  // Media selection variables
+  dynamic _selectedMedia; // Can be File or web file
+  String? _mediaType;
+  bool _isVideo = false;
+  List<int>? _mediaBytes;
+  String? _mediaFileName;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen for changes in the text field to detect language
+    _contentController.addListener(_detectTextDirection);
+  }
 
   @override
   void dispose() {
+    _contentController.removeListener(_detectTextDirection);
     _contentController.dispose();
     super.dispose();
+  }
+  
+  // Helper method to detect if text is Arabic
+  bool _isArabic(String text) {
+    // Arabic Unicode block range: U+0600 to U+06FF
+    final arabicRegex = RegExp(r'[\u0600-\u06FF]');
+    return arabicRegex.hasMatch(text);
+  }
+  
+  // Detect text direction based on content
+  void _detectTextDirection() {
+    final isArabic = _isArabic(_contentController.text);
+    if (isArabic != _isArabicContent) {
+      setState(() {
+        _isArabicContent = isArabic;
+      });
+    }
   }
 
   Future<void> _createPost() async {
@@ -41,7 +75,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     try {
       await Provider.of<PostProvider>(context, listen: false)
-          .createPost(_contentController.text);
+          .createPost(
+            _contentController.text,
+            mediaFile: _selectedMedia,
+            mediaType: _mediaType,
+            mediaBytes: _mediaBytes,
+            fileName: _mediaFileName,
+          );
       
       if (!mounted) return;
       Navigator.pop(context);
@@ -233,6 +273,70 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // Select media (image or video) from gallery
+  Future<void> _selectMedia() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.media,
+        allowMultiple: false,
+        withData: true, // Important for web support
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final fileType = result.files.single.extension?.toLowerCase() ?? '';
+        
+        // Check if it's a supported file type
+        final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(fileType);
+        final isVideo = ['mp4', 'mov', 'avi', 'webm'].contains(fileType);
+        
+        if (!isImage && !isVideo) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Please select an image or video file')),
+            );
+          }
+          return;
+        }
+        
+        // Handle both web and mobile platforms
+        if (result.files.single.bytes != null) {
+          // Web platform or mobile with withData: true
+          setState(() {
+            _mediaBytes = result.files.single.bytes;
+            _mediaFileName = result.files.single.name;
+            _isVideo = isVideo;
+            _mediaType = isImage ? 'image/${fileType == 'jpg' ? 'jpeg' : fileType}' : 'video/$fileType';
+          });
+        } else if (result.files.single.path != null) {
+          // Mobile platform
+          setState(() {
+            _selectedMedia = File(result.files.single.path!);
+            _isVideo = isVideo;
+            _mediaType = isImage ? 'image/${fileType == 'jpg' ? 'jpeg' : fileType}' : 'video/$fileType';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error selecting media: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error selecting media: $e')),
+        );
+      }
+    }
+  }
+  
+  // Remove selected media
+  void _removeMedia() {
+    setState(() {
+      _selectedMedia = null;
+      _mediaBytes = null;
+      _mediaFileName = null;
+      _mediaType = null;
+      _isVideo = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -260,21 +364,90 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         child: Form(
           key: _formKey,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TextFormField(
-                controller: _contentController,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  hintText: 'What\'s on your mind?',
-                  border: OutlineInputBorder(),
+              Directionality(
+                textDirection: _isArabicContent ? TextDirection.rtl : TextDirection.ltr,
+                child: TextFormField(
+                  controller: _contentController,
+                  maxLines: 5,
+                  textAlign: _isArabicContent ? TextAlign.right : TextAlign.left,
+                  textDirection: _isArabicContent ? TextDirection.rtl : TextDirection.ltr,
+                  decoration: InputDecoration(
+                    hintText: 'What\'s on your mind?',
+                    border: const OutlineInputBorder(),
+                    // Align hint text based on content direction
+                    hintTextDirection: _isArabicContent ? TextDirection.rtl : TextDirection.ltr,
+                    alignLabelWithHint: true,
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter some text';
+                    }
+                    return null;
+                  },
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter some text';
-                  }
-                  return null;
-                },
               ),
+              const SizedBox(height: 16),
+              
+              // Media selection section
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _isLoading ? null : _selectMedia,
+                    icon: const Icon(Icons.add_photo_alternate),
+                    label: const Text('Add Media'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.secondary,
+                      foregroundColor: Theme.of(context).colorScheme.onSecondary,
+                    ),
+                  ),
+                  if (_selectedMedia != null) ...[  
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: _removeMedia,
+                      tooltip: 'Remove media',
+                    ),
+                  ],
+                ],
+              ),
+              
+              // Preview selected media
+              if (_selectedMedia != null || _mediaBytes != null) ...[  
+                const SizedBox(height: 16),
+                Container(
+                  height: 200,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: _isVideo
+                    ? Center(
+                        child: Icon(
+                          Icons.video_file,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      )
+                    : _mediaBytes != null
+                      ? Image.memory(
+                          Uint8List.fromList(_mediaBytes!),
+                          fit: BoxFit.cover,
+                        )
+                      : Image.file(
+                          _selectedMedia!,
+                          fit: BoxFit.cover,
+                        ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Selected file: ${_mediaFileName ?? _selectedMedia?.path?.split('/')?.last ?? 'media file'}',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                ),
+              ],
+              
               const SizedBox(height: 16),
               if (_error != null)
                 Padding(
