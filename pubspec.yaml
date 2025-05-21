@@ -52,6 +52,7 @@ dependencies:
   path_provider: ^2.1.2
   permission_handler: ^10.2.0
   video_player: ^2.8.1
+  emoji_picker_flutter: ^1.6.3
 
 dev_dependencies:
   flutter_test:

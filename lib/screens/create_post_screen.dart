@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'package:archive/archive.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
@@ -26,6 +27,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String? _error;
   String _importContent = '';
   bool _isArabicContent = false;
+  bool _showEmojiPicker = false;
   
   // Media selection variables
   dynamic _selectedMedia; // Can be File or web file
@@ -379,6 +381,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     // Align hint text based on content direction
                     hintTextDirection: _isArabicContent ? TextDirection.rtl : TextDirection.ltr,
                     alignLabelWithHint: true,
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.emoji_emotions_outlined),
+                      tooltip: 'Add emoji',
+                      onPressed: () {
+                        setState(() {
+                          _showEmojiPicker = !_showEmojiPicker;
+                        });
+                      },
+                    ),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -388,6 +399,44 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   },
                 ),
               ),
+              
+              // Emoji picker
+              if (_showEmojiPicker) ...[  
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 250,
+                  child: EmojiPicker(
+                    onEmojiSelected: (category, emoji) {
+                      // Insert emoji at current cursor position
+                      final text = _contentController.text;
+                      final selection = _contentController.selection;
+                      final newText = text.replaceRange(
+                        selection.start,
+                        selection.end,
+                        emoji.emoji,
+                      );
+                      _contentController.value = TextEditingValue(
+                        text: newText,
+                        selection: TextSelection.collapsed(
+                          offset: selection.start + emoji.emoji.length,
+                        ),
+                      );
+                    },
+                    config: Config(
+                      columns: 7,
+                      emojiSizeMax: 32,
+                      verticalSpacing: 0,
+                      horizontalSpacing: 0,
+                      initCategory: Category.RECENT,
+                      bgColor: Theme.of(context).scaffoldBackgroundColor,
+                      indicatorColor: Theme.of(context).colorScheme.primary,
+                      iconColor: Colors.grey,
+                      iconColorSelected: Theme.of(context).colorScheme.primary,
+                      recentsLimit: 28,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               
               // Media selection section
