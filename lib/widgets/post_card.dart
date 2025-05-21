@@ -5,14 +5,17 @@ import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../models/post.dart';
 import '../models/author.dart';
+import '../models/supporter.dart';
 import '../providers/auth_provider.dart';
 import '../screens/post_details_screen.dart';
 import '../screens/user_profile_screen.dart';
 import '../services/deep_link_service.dart';
 import '../services/post_service.dart';
+import '../services/api_service.dart';
 import '../widgets/animated_copy_button.dart';
 import '../widgets/qr_dialog.dart';
 import '../widgets/video_thumbnail.dart';
+import '../widgets/supporters_dialog.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 class PostCard extends StatelessWidget {
@@ -335,6 +338,28 @@ class PostCard extends StatelessWidget {
                     onPressed: () => _handleSendReputation(context),
                   ),
                   Text('RPs: ${post.reputationPoints}'),
+                  InkWell(
+                    onTap: () {
+                      if (post.contentHash != null) {
+                        final cleanHash = post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
+                        showSupportersDialog(context, cleanHash);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Cannot show supporters: Post hash not available')),
+                        );
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.people, size: 16),
+                          const SizedBox(width: 4),
+                          Text('${post.supporterCount}'),
+                        ],
+                      ),
+                    ),
+                  ),
                   if (post.isConfirmed)
                     const Icon(Icons.check_circle, color: Colors.green),
                   if (showActions) ...[

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import '../providers/auth_provider.dart';
+import '../models/supporter.dart';
 
 class ApiService {
   // static const String baseUrl = 'http://10.0.2.2:3100/api';
@@ -605,6 +606,37 @@ class ApiService {
     );
 
     return _handleMapResponse(response);
+  }
+
+  // Get post supporters details
+  static Future<SupportersInfo> getPostSupporters(String postHash) async {
+    try {
+      debugPrint('Fetching supporters for post hash: $postHash');
+      final response = await http.get(
+        Uri.parse('$baseUrl/posts/support/$postHash'),
+        headers: await _getHeaders(),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        debugPrint('Supporters data: $data');
+        return SupportersInfo.fromJson(data);
+      } else {
+        debugPrint('Error fetching supporters: ${response.statusCode} - ${response.body}');
+        throw Exception('Failed to fetch post supporters');
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Error in getPostSupporters: $e');
+      debugPrint('Stack trace: $stackTrace');
+      // Return empty supporters info in case of error
+      return SupportersInfo(
+        contentHash: postHash,
+        supporters: [],
+        totalSupporters: 0,
+        totalReceivedRp: 0,
+        lastUpdated: null
+      );
+    }
   }
 
   static Future<void> setToken(String token) async {

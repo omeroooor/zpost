@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../models/post.dart';
 import '../models/author.dart';
 import '../models/comment.dart';
+import '../models/supporter.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/deep_link_service.dart';
@@ -13,6 +14,7 @@ import '../services/post_service.dart';
 import '../widgets/animated_copy_button.dart';
 import '../widgets/custom_snackbar.dart';
 import '../widgets/qr_dialog.dart';
+import '../widgets/supporters_dialog.dart';
 import '../screens/user_profile_screen.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'dart:io';
@@ -44,12 +46,38 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   Uint8List? _mediaBytes;
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
+  SupportersInfo? _supportersInfo;
+  bool _isLoadingSupporters = false;
 
   @override
   void initState() {
     super.initState();
     _loadMedia();
     _loadComments();
+    _loadSupporters();
+  }
+  
+  Future<void> _loadSupporters() async {
+    if (widget.post.contentHash == null) return;
+    
+    setState(() => _isLoadingSupporters = true);
+    
+    try {
+      final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
+      final supportersInfo = await ApiService.getPostSupporters(cleanHash);
+      
+      if (mounted) {
+        setState(() {
+          _supportersInfo = supportersInfo;
+          _isLoadingSupporters = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading supporters: $e');
+      if (mounted) {
+        setState(() => _isLoadingSupporters = false);
+      }
+    }
   }
 
   Future<void> _loadMedia() async {
@@ -536,15 +564,12 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       IconButton(
+                        icon: const Icon(Icons.verified_user),
+                        onPressed: () => _handleVerify(context),
+                      ),
+                      IconButton(
                         icon: const Icon(Icons.account_balance_wallet),
-                        onPressed: () {
-                          if (isVerifyContext) {
-                            _handleVerify(context);
-                          } else {
-                            _handleSendReputation(context);
-                          }
-                          Navigator.pop(context);
-                        },
+                        onPressed: () => _handleSendReputation(context),
                       ),
                       AnimatedCopyButton(
                         textToCopy: baseHash,
@@ -838,6 +863,40 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                       style: const TextStyle(
                         color: Colors.grey,
                         fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    InkWell(
+                      onTap: () {
+                        if (widget.post.contentHash != null) {
+                          final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
+                          showSupportersDialog(context, cleanHash);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Cannot show supporters: Post hash not available')),
+                          );
+                        }
+                      },
+                      child: Row(
+                        children: [
+                          _isLoadingSupporters
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.people, size: 14, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(
+                            _supportersInfo != null 
+                              ? '${_supportersInfo!.totalSupporters} Supporters'
+                              : '${widget.post.supporterCount} Supporters',
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],

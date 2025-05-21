@@ -3,6 +3,7 @@ import 'author.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as path;
+import 'supporter.dart';
 
 class Post {
   final String id;
@@ -21,6 +22,8 @@ class Post {
   final String? hashedId;
   final String? name;
   final String? description;
+  final int supporterCount;
+  final SupportersInfo? supportersInfo;
 
   Post({
     required this.id,
@@ -39,6 +42,8 @@ class Post {
     this.hashedId,
     this.name,
     this.description,
+    this.supporterCount = 0,
+    this.supportersInfo,
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -91,6 +96,10 @@ class Post {
         hashedId: json['hashedId'] as String?,
         name: json['name'] as String?,
         description: json['description'] as String?,
+        supporterCount: json['supporterCount'] as int? ?? 0,
+        supportersInfo: json['supportersInfo'] != null
+          ? SupportersInfo.fromJson(json['supportersInfo'] as Map<String, dynamic>)
+          : null,
       );
     } catch (e, stackTrace) {
       debugPrint('Error parsing post: $e');
@@ -118,6 +127,8 @@ class Post {
       'hashedId': hashedId,
       'name': name,
       'description': description,
+      'supporterCount': supporterCount,
+      'supportersInfo': supportersInfo?.toJson(),
     };
   }
 
@@ -189,6 +200,8 @@ class Post {
     String? hashedId,
     String? name,
     String? description,
+    int? supporterCount,
+    SupportersInfo? supportersInfo,
   }) {
     return Post(
       id: id ?? this.id,
@@ -207,6 +220,8 @@ class Post {
       hashedId: hashedId ?? this.hashedId,
       name: name ?? this.name,
       description: description ?? this.description,
+      supporterCount: supporterCount ?? this.supporterCount,
+      supportersInfo: supportersInfo ?? this.supportersInfo,
     );
   }
 }
