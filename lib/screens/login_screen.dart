@@ -26,12 +26,14 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   final _otpController = TextEditingController();
   bool _isLoading = false;
   bool _otpRequested = false;
+  bool _isCheckingNotification = false;
   String? _error;
   String? _encryptedOtp;
   PublicKeyEntry? _selectedKey;
   static const _channel = MethodChannel('app.channel.shared.data');
   final AppLinks _appLinks = AppLinks();
   StreamSubscription<Uri>? _uriLinkSubscription;
+  Timer? _notificationCheckTimer;
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     _otpController.dispose();
     _publicKeyController.dispose();
     _uriLinkSubscription?.cancel();
+    _notificationCheckTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -64,11 +67,13 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
   void _resetState() {
     print('Resetting login state');
+    _notificationCheckTimer?.cancel();
     setState(() {
       _otpController.clear();
       _error = null;
       _encryptedOtp = null;
       _isLoading = false;
+      _isCheckingNotification = false;
     });
   }
 
@@ -229,12 +234,13 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _resetOtpRequest() {
+  void _resetOtpRequest() async {
+    _notificationCheckTimer?.cancel();
     setState(() {
-      _otpRequested = false;
-      _otpController.clear();
       _encryptedOtp = null;
+      _otpController.clear();
       _error = null;
+      _isCheckingNotification = false;
     });
   }
 
@@ -271,6 +277,81 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
         });
       }
     }
+  }
+  
+  // Request OTP with notification and start polling for authorization
+  Future<void> _requestOtpWithNotification() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    // Cancel any existing timer
+    _notificationCheckTimer?.cancel();
+    
+    setState(() {
+      _isLoading = true;
+      _isCheckingNotification = true;
+      _error = null;
+    });
+    
+    try {
+      // Request OTP with notification flag
+      await ApiService.requestOtpWithNotification(_publicKeyController.text.trim());
+      
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          CustomSnackbar.show(
+            context,
+            message: 'Notification sent! Please check your device.',
+          );
+        });
+        
+        // Start polling for authorization
+        _startPollingForAuthorization();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+          _isCheckingNotification = false;
+        });
+      }
+    }
+  }
+  
+  // Start polling for authorization status
+  void _startPollingForAuthorization() {
+    // Check every 3 seconds
+    _notificationCheckTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      try {
+        print('Checking OTP authorization status...');
+        final response = await ApiService.checkOtpStatus(_publicKeyController.text.trim());
+        
+        // If authorized, handle the login
+        if (response['authorized'] == true) {
+          print('OTP authorized via notification!');
+          timer.cancel();
+          
+          if (mounted) {
+            final authProvider = context.read<AuthProvider>();
+            await authProvider.authenticate(
+              response['token'],
+              response['publicKeyHash'],
+              response['name'],
+            );
+            
+            setState(() {
+              _isCheckingNotification = false;
+            });
+          }
+        } else {
+          print('OTP not yet authorized...');
+        }
+      } catch (e) {
+        print('Error checking OTP status: $e');
+        // Don't stop polling on error, just continue
+      }
+    });
   }
 
   Future<void> _handleOtpDecryption() async {
@@ -350,30 +431,61 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                             },
                           ),
                           const SizedBox(height: 16),
-                          Row(
+                          Column(
                             children: [
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: _isLoading ? null : _requestOtp,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: _isLoading ? null : _requestOtp,
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.all(16),
+                                      ),
+                                      child: _isLoading && !_isCheckingNotification
+                                          ? const SizedBox(
+                                              height: 20,
+                                              width: 20,
+                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                            )
+                                          : const Text('Request OTP'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  ElevatedButton.icon(
+                                    onPressed: _openWallet,
+                                    icon: const Icon(Icons.account_balance_wallet),
+                                    label: const Text('Use Wallet'),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.all(16),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: _isLoading ? null : _requestOtpWithNotification,
+                                  icon: const Icon(Icons.notifications_active),
+                                  label: _isCheckingNotification
+                                      ? Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Text('Waiting for notification '),
+                                            const SizedBox(width: 8),
+                                            const SizedBox(
+                                              height: 16,
+                                              width: 16,
+                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                            ),
+                                          ],
+                                        )
+                                      : const Text('Login with Notification'),
                                   style: ElevatedButton.styleFrom(
                                     padding: const EdgeInsets.all(16),
+                                    backgroundColor: Theme.of(context).colorScheme.secondary,
+                                    foregroundColor: Theme.of(context).colorScheme.onSecondary,
                                   ),
-                                  child: _isLoading
-                                      ? const SizedBox(
-                                          height: 20,
-                                          width: 20,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        )
-                                      : const Text('Request OTP'),
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              ElevatedButton.icon(
-                                onPressed: _openWallet,
-                                icon: const Icon(Icons.account_balance_wallet),
-                                label: const Text('Use Wallet'),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.all(16),
                                 ),
                               ),
                             ],

@@ -10,6 +10,7 @@ import '../models/supporter.dart';
 class ApiService {
   // static const String baseUrl = 'http://10.0.2.2:3100/api';
   static const String baseUrl = 'https://zpost.kbunet.net/api';
+  // static const String baseUrl = 'http://localhost:3050/api';
   static AuthProvider? _authProvider;
 
   static void initialize(AuthProvider authProvider) {
@@ -86,6 +87,30 @@ class ApiService {
       body: jsonEncode({
         'publicKey': publicKey,
         'otp': otp,
+      }),
+    );
+
+    return _handleMapResponse(response);
+  }
+
+  // Check if OTP has been authorized via notification
+  static Future<Map<String, dynamic>> checkOtpStatus(String publicKey) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/auth/check/otp?publicKey=$publicKey'),
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    return _handleMapResponse(response);
+  }
+
+  // Request OTP with notification option
+  static Future<Map<String, dynamic>> requestOtpWithNotification(String publicKey) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/auth/request-otp'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'publicKey': publicKey,
+        'notification': true
       }),
     );
 
