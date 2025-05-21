@@ -1,0 +1,8 @@
+version: '3'
+
+services:
+  zpost-web:
+    build: .
+    ports:
+      - "80:80"
+    restart: always
