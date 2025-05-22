@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -14,17 +15,40 @@ class AppDrawer extends StatelessWidget {
           return ListView(
             padding: EdgeInsets.zero,
             children: [
-              UserAccountsDrawerHeader(
-                currentAccountPicture: CircleAvatar(
-                  backgroundImage: authProvider.profileImage != null
-                      ? MemoryImage(base64Decode(authProvider.profileImage!))
-                      : null,
-                  child: authProvider.profileImage == null
-                      ? const Icon(Icons.person)
-                      : null,
+              DrawerHeader(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
                 ),
-                accountName: Text(authProvider.name ?? 'Anonymous'),
-                accountEmail: Text(authProvider.publicKeyHash ?? ''),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundImage: authProvider.profileImage != null
+                          ? MemoryImage(base64Decode(authProvider.profileImage!))
+                          : null,
+                      child: authProvider.profileImage == null
+                          ? const Icon(Icons.person, size: 30)
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      authProvider.name ?? 'Anonymous',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Theme.of(context).colorScheme.onPrimary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      authProvider.publicKeyHash ?? '',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.8),
+                          ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
               ListTile(
                 leading: const Icon(Icons.home),
@@ -65,6 +89,32 @@ class AppDrawer extends StatelessWidget {
                 title: const Text('My Posts'),
                 onTap: () {
                   Navigator.pushNamed(context, '/my-posts');
+                },
+              ),
+              const Divider(),
+              Consumer<ThemeProvider>(
+                builder: (context, themeProvider, _) {
+                  final isDarkMode = themeProvider.isDarkMode(context);
+                  return ListTile(
+                    leading: Icon(
+                      isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                    ),
+                    title: Text(isDarkMode ? 'Light Mode' : 'Dark Mode'),
+                    trailing: Switch(
+                      value: isDarkMode,
+                      onChanged: (_) => themeProvider.toggleTheme(),
+                      activeColor: Theme.of(context).colorScheme.primary,
+                    ),
+                    onTap: () => themeProvider.toggleTheme(),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_brightness),
+                title: const Text('Use System Theme'),
+                onTap: () {
+                  Provider.of<ThemeProvider>(context, listen: false).useSystemTheme();
+                  Navigator.pop(context);
                 },
               ),
               const Divider(),

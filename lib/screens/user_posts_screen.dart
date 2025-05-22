@@ -267,23 +267,75 @@ class _UserPostsScreenState extends State<UserPostsScreen> {
                                     ).then((_) => _loadPosts(reset: true));
                                   },
                                   onDelete: () async {
-                                    try {
-                                      await ApiService.deletePost(_posts[index].id);
-                                      _loadPosts(reset: true);
-                                      if (mounted) {
-                                        CustomSnackbar.show(
-                                          context,
-                                          message: 'Post deleted successfully',
-                                          type: SnackbarType.success,
+                                    // Show confirmation dialog
+                                    final confirmed = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        title: const Text('Delete Post'),
+                                        content: const Text(
+                                          'Are you sure you want to delete this post? This action cannot be undone.',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(context).pop(false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Theme.of(context).colorScheme.error,
+                                            ),
+                                            onPressed: () => Navigator.of(context).pop(true),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                    ) ?? false;
+                                    
+                                    // If user confirmed deletion
+                                    if (confirmed) {
+                                      try {
+                                        // Show loading indicator
+                                        showDialog(
+                                          context: context,
+                                          barrierDismissible: false,
+                                          builder: (context) => const AlertDialog(
+                                            content: Row(
+                                              children: [
+                                                CircularProgressIndicator(),
+                                                SizedBox(width: 16),
+                                                Text('Deleting post...'),
+                                              ],
+                                            ),
+                                          ),
                                         );
-                                      }
-                                    } catch (e) {
-                                      if (mounted) {
-                                        CustomSnackbar.show(
-                                          context,
-                                          message: 'Failed to delete post',
-                                          type: SnackbarType.error,
-                                        );
+                                        
+                                        // Delete the post
+                                        await ApiService.deletePost(_posts[index].id);
+                                        
+                                        // Close loading dialog
+                                        if (mounted) Navigator.of(context).pop();
+                                        
+                                        // Refresh posts list
+                                        _loadPosts(reset: true);
+                                        
+                                        if (mounted) {
+                                          CustomSnackbar.show(
+                                            context,
+                                            message: 'Post deleted successfully',
+                                            type: SnackbarType.success,
+                                          );
+                                        }
+                                      } catch (e) {
+                                        // Close loading dialog if it's showing
+                                        if (mounted) Navigator.of(context).pop();
+                                        
+                                        if (mounted) {
+                                          CustomSnackbar.show(
+                                            context,
+                                            message: 'Failed to delete post',
+                                            type: SnackbarType.error,
+                                          );
+                                        }
                                       }
                                     }
                                   },

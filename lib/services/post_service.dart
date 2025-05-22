@@ -9,17 +9,19 @@ import '../models/post.dart';
 import '../models/author.dart';
 import 'post_standard_service.dart';
 import 'api_service.dart';
+import 'media_cache_service.dart';
+import '../config/api_config.dart';
 
 class PostService {
-  // static const String baseUrl = 'http://10.0.2.2:3100/api';
-  // static const String baseUrl = 'https://zpost.kbunet.net/api';
-  static const String baseUrl = 'http://localhost:3050/api';
+  // Use centralized API configuration
+  static String get baseUrl => ApiConfig.baseUrl;
   
   // Get auth headers
   static Future<Map<String, String>> _getHeaders() async {
     final token = await ApiService.getToken();
     return {
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
       'Authorization': token != null ? 'Bearer $token' : '',
     };
   }
@@ -247,20 +249,24 @@ class PostService {
     }
   }
 
-  // Download media file
+  // Download media file with caching
   static Future<Uint8List> downloadMedia(String mediaPath) async {
     try {
-      // Check if the mediaPath is already a full URL
-      final Uri mediaUri;
-      if (mediaPath.startsWith('http')) {
-        mediaUri = Uri.parse(mediaPath);
-      } else {
-        // The API endpoint might be expecting media in a different location
-        // Try multiple possible paths
-        mediaUri = Uri.parse('$baseUrl/media/$mediaPath');
+      final mediaCacheService = MediaCacheService();
+      
+      // Use ApiConfig to get the proper media URL
+      String mediaUrl = ApiConfig.getMediaUrl(mediaPath);
+      
+      // Try to get media from cache first
+      final cachedMedia = await mediaCacheService.getMedia(mediaUrl);
+      if (cachedMedia != null) {
+        debugPrint('Retrieved media from cache: $mediaUrl');
+        return cachedMedia;
       }
       
-      debugPrint('Downloading media from: $mediaUri');
+      // If not in cache, download and store
+      debugPrint('Downloading media from: $mediaUrl');
+      final Uri mediaUri = Uri.parse(mediaUrl);
       final response = await http.get(
         mediaUri,
         headers: await _getHeaders(),
@@ -269,9 +275,17 @@ class PostService {
       if (response.statusCode != 200) {
         debugPrint('Failed to download media: ${response.statusCode} - ${response.body}');
         
-        // If the first attempt fails, try an alternative path
-        final alternativeUri = Uri.parse('$baseUrl/posts/media/$mediaPath');
+        // If the first attempt fails, try an alternative URL using our ApiConfig helper
+        final alternativeUrl = ApiConfig.getAlternativeMediaUrl(mediaPath);
+        final alternativeUri = Uri.parse(alternativeUrl);
         debugPrint('Retrying with alternative path: $alternativeUri');
+        
+        // Try to get alternative path from cache
+        final cachedAlternativeMedia = await mediaCacheService.getMedia(alternativeUrl);
+        if (cachedAlternativeMedia != null) {
+          debugPrint('Retrieved alternative media from cache: $alternativeUrl');
+          return cachedAlternativeMedia;
+        }
         
         final alternativeResponse = await http.get(
           alternativeUri,
@@ -280,12 +294,33 @@ class PostService {
         
         if (alternativeResponse.statusCode != 200) {
           debugPrint('Alternative path also failed: ${alternativeResponse.statusCode} - ${alternativeResponse.body}');
-          throw Exception('Failed to download media file');
+          
+          // One more attempt with a direct uploads path
+          final directUrl = '${ApiConfig.serverBaseUrl}/uploads/${mediaPath.split('/').last}';
+          debugPrint('Making final attempt with direct path: $directUrl');
+          
+          final directResponse = await http.get(
+            Uri.parse(directUrl),
+            headers: await _getHeaders(),
+          );
+          
+          if (directResponse.statusCode != 200) {
+            debugPrint('All attempts failed to load media');
+            throw Exception('Failed to download media file after multiple attempts');
+          }
+          
+          // Cache the successful direct response
+          await mediaCacheService.cacheMedia(directUrl, directResponse.bodyBytes);
+          return directResponse.bodyBytes;
         }
         
+        // Cache the successful alternative response
+        await mediaCacheService.cacheMedia(alternativeUrl, alternativeResponse.bodyBytes);
         return alternativeResponse.bodyBytes;
       }
 
+      // Cache the successful response
+      await mediaCacheService.cacheMedia(mediaUrl, response.bodyBytes);
       return response.bodyBytes;
     } catch (e) {
       debugPrint('Error downloading media: $e');

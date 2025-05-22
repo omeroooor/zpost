@@ -8,11 +8,21 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import '../providers/auth_provider.dart';
 import '../models/supporter.dart';
+import '../config/api_config.dart';
+
+// Custom exception for file size errors
+class FileTooLargeException implements Exception {
+  final String message;
+  
+  FileTooLargeException(this.message);
+  
+  @override
+  String toString() => message;
+}
 
 class ApiService {
-  // static const String baseUrl = 'http://10.0.2.2:3100/api';
-  // static const String baseUrl = 'https://zpost.kbunet.net/api';
-  static const String baseUrl = 'http://localhost:3050/api';
+  // Use centralized API configuration
+  static String get baseUrl => ApiConfig.baseUrl;
   static AuthProvider? _authProvider;
 
   static void initialize(AuthProvider authProvider) {
@@ -30,11 +40,21 @@ class ApiService {
       await _handleUnauthorized();
       throw Exception('Session expired. Please login again.');
     }
+    
+    if (response.statusCode == 413) {
+      throw FileTooLargeException('The file is too large. Please use a smaller file (max 10MB).');
+    }
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       return jsonDecode(response.body);
     } else {
-      throw Exception(jsonDecode(response.body)['message']);
+      try {
+        final errorMessage = jsonDecode(response.body)['message'] ?? 'Server error: ${response.statusCode}';
+        throw Exception(errorMessage);
+      } catch (e) {
+        // If we can't decode the JSON, use the status code
+        throw Exception('Server error: ${response.statusCode}');
+      }
     }
   }
 
@@ -61,7 +81,7 @@ class ApiService {
   ) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/authenticate'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       body: jsonEncode({
         'name': name,
         'publicKey': publicKey,
@@ -75,7 +95,7 @@ class ApiService {
   static Future<Map<String, dynamic>> requestOtp(String publicKey) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/request-otp'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       body: jsonEncode({'publicKey': publicKey}),
     );
 
@@ -85,7 +105,7 @@ class ApiService {
   static Future<Map<String, dynamic>> verifyOtp(String publicKey, String otp) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/verify-otp'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       body: jsonEncode({
         'publicKey': publicKey,
         'otp': otp,
@@ -99,7 +119,7 @@ class ApiService {
   static Future<Map<String, dynamic>> checkOtpStatus(String publicKey) async {
     final response = await http.get(
       Uri.parse('$baseUrl/auth/check/otp?publicKey=$publicKey'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
     );
 
     return _handleMapResponse(response);
@@ -109,7 +129,7 @@ class ApiService {
   static Future<Map<String, dynamic>> requestOtpWithNotification(String publicKey) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/request-otp'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       body: jsonEncode({
         'publicKey': publicKey,
         'notification': true
@@ -137,6 +157,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
     );
 
@@ -299,10 +320,54 @@ class ApiService {
     request.files.add(multipartFile);
 
     // Send the request
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
-
-    return _handleMapResponse(response);
+    try {
+      // Log the request details for debugging
+      print('Sending multipart request to $baseUrl/posts with media file');
+      
+      final streamedResponse = await request.send();
+      
+      // Check status code directly from the streamed response
+      if (streamedResponse.statusCode == 413) {
+        print('Received 413 status code - File too large');
+        throw FileTooLargeException('The file is too large. Please use a smaller file (max 10MB).');
+      }
+      
+      final response = await http.Response.fromStream(streamedResponse);
+      
+      // Double-check status code from the response
+      if (response.statusCode == 413) {
+        print('Received 413 status code - File too large');
+        throw FileTooLargeException('The file is too large. Please use a smaller file (max 10MB).');
+      }
+      
+      return _handleMapResponse(response);
+    } catch (e) {
+      // Log the error for debugging
+      print('Error in createPost: ${e.toString()}');
+      
+      if (e is FileTooLargeException) {
+        print('Rethrowing FileTooLargeException');
+        rethrow;
+      }
+      
+      // Check for various forms of 413/file size errors
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('413') || 
+          errorStr.contains('entity too large') ||
+          errorStr.contains('request entity too large') ||
+          errorStr.contains('too large')) {
+        print('Detected file size error: $errorStr');
+        throw FileTooLargeException('The file is too large. Please use a smaller file (max 10MB).');
+      }
+      
+      // For XMLHttpRequest errors that might be hiding a 413
+      if (errorStr.contains('xmlhttprequest') && (mediaFile != null || mediaBytes != null)) {
+        print('XMLHttpRequest error with media file - might be a file size issue');
+        throw FileTooLargeException('The file may be too large. Please try with a smaller file (max 10MB).');
+      }
+      
+      rethrow;
+    }
   }
 
   static Future<Map<String, dynamic>> updatePost(String postId, String content) async {
@@ -312,6 +377,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
       body: jsonEncode({'content': content}),
     );
@@ -326,6 +392,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
     );
 
@@ -367,6 +434,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
     );
 
@@ -382,6 +450,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
     );
 
@@ -606,6 +675,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
       body: jsonEncode({
         'targetPublicKeyHash': publicKeyHash,
@@ -627,6 +697,7 @@ class ApiService {
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
     );
 
@@ -695,6 +766,31 @@ class ApiService {
 
     return _handleMapResponse(response);
   }
+  
+  // Import a post from W3-S-POST-NFT format
+  static Future<Map<String, dynamic>> importPost(String jsonContent) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/posts/import'),
+        headers: await _getHeaders(),
+        body: jsonEncode({
+          'content': jsonContent,
+        }),
+      );
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        debugPrint('Server error details:');
+        debugPrint('Message: ${error['message']}');
+        throw Exception('Failed to import post: ${error['message']}');
+      }
+    } catch (e) {
+      debugPrint('Error importing post: $e');
+      rethrow;
+    }
+  }
 
   // Get post supporters details
   static Future<SupportersInfo> getPostSupporters(String postHash) async {
@@ -747,6 +843,7 @@ class ApiService {
     final token = prefs.getString('token');
     return {
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
       'Authorization': token != null ? 'Bearer $token' : '',
     };
   }

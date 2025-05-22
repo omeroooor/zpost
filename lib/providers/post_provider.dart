@@ -99,6 +99,23 @@ class PostProvider with ChangeNotifier {
       rethrow;
     }
   }
+  
+  // Import a post from W3-S-POST-NFT format
+  Future<Post> importPost(String jsonContent) async {
+    try {
+      final postData = await ApiService.importPost(jsonContent);
+      if (postData is! Map<String, dynamic>) {
+        throw Exception('Invalid post data format');
+      }
+      final post = Post.fromJson(postData);
+      _userPosts.insert(0, post);
+      notifyListeners();
+      return post;
+    } catch (e) {
+      print('Error importing post: $e');
+      rethrow;
+    }
+  }
 
   Future<Post> updatePost(String postId, String content) async {
     try {

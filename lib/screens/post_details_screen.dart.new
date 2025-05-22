@@ -1,11 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:http/http.dart' as http;
 import '../models/post.dart';
 import '../models/author.dart';
 import '../models/comment.dart';
@@ -14,7 +11,6 @@ import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/deep_link_service.dart';
 import '../services/post_service.dart';
-import '../services/media_cache_service.dart';
 import '../config/api_config.dart';
 import '../widgets/animated_copy_button.dart';
 import '../widgets/custom_snackbar.dart';
@@ -59,12 +55,9 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    // Load media and other data immediately when screen initializes
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadMedia();
-      _loadComments();
-      _loadSupporters();
-    });
+    _loadMedia();
+    _loadComments();
+    _loadSupporters();
   }
   
   Future<void> _loadSupporters() async {
@@ -100,94 +93,29 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     debugPrint('Media type: ${widget.post.mediaType}');
     
     try {
-      setState(() => _isLoading = true);
-      
-      // Construct the media URL
+      // Try to load media directly using Image.network first to see if URL is accessible
       final mediaUrl = ApiConfig.getMediaUrl(widget.post.mediaPath!);
       debugPrint('Constructed media URL: $mediaUrl');
       
-      // First try to get media from cache using MediaCacheService
-      final mediaCacheService = MediaCacheService();
-      Uint8List? mediaBytes;
+      // Now try to download the media using our service
+      final bytes = await PostService.downloadMedia(widget.post.mediaPath!);
+      debugPrint('Media downloaded successfully, bytes length: ${bytes.length}');
       
-      // Try to get from cache first
-      try {
-        mediaBytes = await mediaCacheService.getMedia(mediaUrl);
-        if (mediaBytes != null) {
-          debugPrint('Retrieved media from cache, bytes length: ${mediaBytes.length}');
-          
-          if (mounted) {
-            setState(() {
-              _mediaBytes = mediaBytes;
-              _isLoading = false;
-            });
+      if (mounted) {
+        setState(() {
+          _mediaBytes = bytes;
+          debugPrint('Media bytes set in state, length: ${_mediaBytes?.length}');
+        });
 
-            if ((widget.post.mediaType?.contains('video') == true || widget.post.mediaType == 'video') && _mediaBytes != null) {
-              await _initializeVideoPlayer();
-            }
-            return; // Successfully loaded from cache
-          }
-        }
-      } catch (cacheError) {
-        debugPrint('Error retrieving from cache: $cacheError');
-      }
-      
-      // If not in cache, try PostService.downloadMedia
-      try {
-        final bytes = await PostService.downloadMedia(widget.post.mediaPath!);
-        debugPrint('Media downloaded successfully via PostService, bytes length: ${bytes.length}');
-        
-        // Save to cache for future use
-        await mediaCacheService.cacheMedia(mediaUrl, bytes);
-        
-        if (mounted) {
-          setState(() {
-            _mediaBytes = bytes;
-            _isLoading = false;
-          });
-
-          if ((widget.post.mediaType?.contains('video') == true || widget.post.mediaType == 'video') && _mediaBytes != null) {
-            await _initializeVideoPlayer();
-          }
-        }
-      } catch (serviceError) {
-        debugPrint('Error using PostService.downloadMedia: $serviceError');
-        
-        // Last attempt: Try direct HTTP request
-        try {
-          final response = await http.get(Uri.parse(mediaUrl));
-          if (response.statusCode == 200) {
-            debugPrint('Media downloaded successfully via direct HTTP, bytes length: ${response.bodyBytes.length}');
-            
-            // Save to cache for future use
-            await mediaCacheService.cacheMedia(mediaUrl, response.bodyBytes);
-            
-            if (mounted) {
-              setState(() {
-                _mediaBytes = response.bodyBytes;
-                _isLoading = false;
-              });
-
-              if ((widget.post.mediaType?.contains('video') == true || widget.post.mediaType == 'video') && _mediaBytes != null) {
-                await _initializeVideoPlayer();
-              }
-            }
-          } else {
-            throw Exception('HTTP error: ${response.statusCode}');
-          }
-        } catch (httpError) {
-          debugPrint('Error using direct HTTP: $httpError');
-          rethrow;
+        if (widget.post.mediaType == 'video' && _mediaBytes != null) {
+          await _initializeVideoPlayer();
         }
       }
     } catch (e) {
-      debugPrint('All media loading attempts failed: $e');
+      debugPrint('Error loading media: $e');
       debugPrint('Stack trace: ${StackTrace.current}');
       if (mounted) {
-        setState(() {
-          _error = 'Failed to load media: $e';
-          _isLoading = false;
-        });
+        setState(() => _error = 'Failed to load media: $e');
       }
     }
   }
@@ -221,17 +149,12 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     setState(() => _isLoading = true);
     
     try {
-      final commentsData = await ApiService.getComments(widget.post.id!);
+      final comments = await ApiService.getPostComments(widget.post.id!);
       
       if (mounted) {
         setState(() {
-          _comments = commentsData
-              .map((commentData) => Comment.fromJson(commentData))
-              .toList();
-          // Sort comments by creation date (newest first)
-          _comments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          _comments = comments;
           _isLoading = false;
-          _error = null;
         });
       }
     } catch (e) {
@@ -247,12 +170,13 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
 
   Future<void> _refreshPost() async {
     try {
-      // Since there's no direct getPost method, we'll just reload comments
-      // and supporters for now
+      final updatedPost = await ApiService.getPost(widget.post.id!);
       if (mounted) {
-        await _loadComments();
-        await _loadSupporters();
+        setState(() {
+          // Update post data
+        });
       }
+      await _loadComments();
     } catch (e) {
       debugPrint('Error refreshing post: $e');
       if (mounted) {
@@ -270,28 +194,17 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     setState(() => _isLoading = true);
     
     try {
-      final commentData = await ApiService.createComment(
+      final comment = await ApiService.createComment(
         widget.post.id!,
         _commentController.text.trim(),
       );
       
       if (mounted) {
-        final comment = Comment.fromJson(commentData);
         setState(() {
-          // Add the new comment at the beginning of the list (since we're sorting by newest first)
-          _comments.insert(0, comment);
+          _comments.add(comment);
           _isLoading = false;
           _commentController.clear();
         });
-        
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Comment added successfully'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
       }
     } catch (e) {
       debugPrint('Error creating comment: $e');
@@ -305,148 +218,52 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   }
 
   Future<void> _deleteComment(Comment comment) async {
-    // Show confirmation dialog
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Comment'),
-        content: const Text('Are you sure you want to delete this comment? This action cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.errorContainer,
-              foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    ) ?? false;
-  
-    if (!shouldDelete) return;
-  
-    // Set the specific comment as loading instead of the whole screen
-    setState(() {
-      comment = Comment(
-        id: comment.id,
-        author: comment.author,
-        content: comment.content,
-        createdAt: comment.createdAt,
-        postId: comment.postId,
-        updatedAt: comment.updatedAt,
-        isDeleting: true, // New property to track deletion state
-      );
-      // Update the comment in the list
-      final index = _comments.indexWhere((c) => c.id == comment.id);
-      if (index != -1) {
-        _comments[index] = comment;
-      }
-    });
-  
-    try {
-      await ApiService.deleteComment(comment.id);
+    setState(() => _isLoading = true);
     
+    try {
+      await ApiService.deleteComment(comment.id!);
+      
       if (mounted) {
         setState(() {
           _comments.removeWhere((c) => c.id == comment.id);
+          _isLoading = false;
         });
-      
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Comment deleted successfully'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
       }
     } catch (e) {
       debugPrint('Error deleting comment: $e');
       if (mounted) {
         setState(() {
           _error = 'Failed to delete comment: $e';
-          // Reset the deleting state
-          final index = _comments.indexWhere((c) => c.id == comment.id);
-          if (index != -1) {
-            _comments[index] = Comment(
-              id: comment.id,
-              author: comment.author,
-              content: comment.content,
-              createdAt: comment.createdAt,
-              postId: comment.postId,
-              updatedAt: comment.updatedAt,
-              isDeleting: false,
-            );
-          }
+          _isLoading = false;
         });
-      
-        // Show error message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to delete comment: ${e.toString().split(':').last}'),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Theme.of(context).colorScheme.error,
-            duration: const Duration(seconds: 3),
-          ),
-        );
       }
     }
   }
 
   Future<void> _handleSendReputation(BuildContext context) async {
     if (widget.post.contentHash == null) {
-      _showErrorDialog(
-        context,
-        'Cannot Support Post',
-        'This post does not have a valid content hash. Support is only available for verified posts.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot support: Post hash not available')),
       );
       return;
     }
 
     try {
-      // Show loading dialog
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text('Opening wallet app...'),
-            ],
-          ),
-        ),
-      );
-
       final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
-      await DeepLinkService.launchWalletForReputation(cleanHash);
+      final result = await DeepLinkService.openSendReputationLink(cleanHash);
       
-      // Close loading dialog
-      if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Support request sent successfully')),
-        );
+      if (result) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Support request sent successfully')),
+          );
+        }
       }
     } catch (e) {
       debugPrint('Error sending reputation: $e');
       if (mounted) {
-        // Close loading dialog if it's showing
-        Navigator.of(context).pop();
-        
-        // Show error dialog with options
-        _showDeepLinkErrorDialog(
-          context,
-          'Support Error',
-          'Unable to open wallet app. Make sure you have a compatible wallet installed.',
-          widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', ''),
-          true, // isSupport
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send support request: $e')),
         );
       }
     }
@@ -454,53 +271,28 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
 
   Future<void> _handleVerify(BuildContext context) async {
     if (widget.post.contentHash == null) {
-      _showErrorDialog(
-        context,
-        'Cannot Verify Post',
-        'This post does not have a valid content hash. Verification is only available for posts with content hashes.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot verify: Post hash not available')),
       );
       return;
     }
 
     try {
-      // Show loading dialog
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text('Opening wallet app...'),
-            ],
-          ),
-        ),
-      );
-
       final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
-      await DeepLinkService.launchWalletForVerify(cleanHash);
+      final result = await DeepLinkService.openVerifyLink(cleanHash);
       
-      // Close loading dialog
-      if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Verification request sent successfully')),
-        );
+      if (result) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Verification request sent successfully')),
+          );
+        }
       }
     } catch (e) {
       debugPrint('Error verifying post: $e');
       if (mounted) {
-        // Close loading dialog if it's showing
-        Navigator.of(context).pop();
-        
-        // Show error dialog with options
-        _showDeepLinkErrorDialog(
-          context,
-          'Verification Error',
-          'Unable to open wallet app. Make sure you have a compatible wallet installed.',
-          widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', ''),
-          false, // isSupport
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send verification request: $e')),
         );
       }
     }
@@ -508,87 +300,18 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
 
   void _showQRDialog(BuildContext context) {
     if (widget.post.contentHash == null) {
-      _showErrorDialog(
-        context,
-        'QR Code Not Available',
-        'This post does not have a valid content hash. QR codes are only available for posts with content hashes.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot show QR code: Post hash not available')),
       );
       return;
     }
 
     final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
-    QRDialog.show(
+    showQRDialog(
       context: context,
       title: 'Post Verification QR',
-      data: cleanHash,
-      onVerify: () => _handleVerify(context),
-      onSupport: () => _handleSendReputation(context),
-    );
-  }
-  
-  // Helper method to show error dialogs
-  void _showErrorDialog(BuildContext context, String title, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // Helper method to show deep link error dialogs with options
-  void _showDeepLinkErrorDialog(BuildContext context, String title, String message, String hash, bool isSupport) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            const SizedBox(height: 16),
-            const Text('Options:'),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.content_copy),
-              title: const Text('Copy Hash'),
-              subtitle: const Text('Copy the post hash to clipboard'),
-              dense: true,
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: hash));
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Hash copied to clipboard')),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.qr_code),
-              title: const Text('Show QR Code'),
-              subtitle: const Text('Display QR code for scanning'),
-              dense: true,
-              onTap: () {
-                Navigator.of(context).pop();
-                _showQRDialog(context);
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
+      qrData: cleanHash,
+      subtitle: 'Scan to verify this post',
     );
   }
 
@@ -701,7 +424,6 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   }
 
   Widget _buildMediaContent() {
-    // Show loading indicator when media is being loaded
     if (_isLoading && _mediaBytes == null) {
       return const Center(
         child: Padding(
@@ -711,116 +433,39 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
       );
     }
     
-    // Show error if there was an issue loading media
     if (_error != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _error!,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _error = null;
-                    _isLoading = true;
-                  });
-                  _loadMedia();
-                },
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    
-    // If media is still loading but we have a URL, try to display a network image while waiting
-    if (_mediaBytes == null && widget.post.mediaPath != null) {
-      final mediaUrl = ApiConfig.getMediaUrl(widget.post.mediaPath!);
-      return Stack(
-        alignment: Alignment.center,
-        children: [
-          // Attempt to show a network image while waiting for bytes
-          if ((widget.post.mediaType?.startsWith('image') == true || widget.post.mediaType == 'image'))
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                mediaUrl,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    width: double.infinity,
-                    height: 200,
-                    color: Theme.of(context).colorScheme.surfaceVariant,
-                  );
-                },
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return Container(
-                    width: double.infinity,
-                    height: 200,
-                    color: Theme.of(context).colorScheme.surfaceVariant,
-                    child: const Center(child: CircularProgressIndicator()),
-                  );
-                },
-              ),
+          child: Text(
+            _error!,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.error,
             ),
-          // Show loading indicator on top
-          if (_isLoading)
-            const CircularProgressIndicator(),
-        ],
-      );
-    }
-    
-    // Handle different media types
-    if (widget.post.mediaType?.startsWith('image') == true || 
-        widget.post.mediaType == 'image') {
-      return Hero(
-        tag: 'post-media-${widget.post.id}',
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.memory(
-            _mediaBytes!,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            errorBuilder: (context, error, stackTrace) {
-              debugPrint('Error displaying image from memory: $error');
-              // Fallback to network image if memory image fails
-              final mediaUrl = ApiConfig.getMediaUrl(widget.post.mediaPath!);
-              return Image.network(
-                mediaUrl,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                errorBuilder: (context, error, stackTrace) {
-                  debugPrint('Error displaying network image: $error');
-                  return Container(
-                    width: double.infinity,
-                    height: 200,
-                    color: Theme.of(context).colorScheme.surfaceVariant,
-                    child: const Center(
-                      child: Text('Could not load image'),
-                    ),
-                  );
-                },
-              );
-            },
           ),
         ),
       );
-    } else if ((widget.post.mediaType?.startsWith('video') == true || 
-               widget.post.mediaType == 'video') && 
-               _isVideoInitialized && 
-               _videoController != null) {
+    }
+    
+    if (_mediaBytes == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text('Media not available'),
+        ),
+      );
+    }
+    
+    if (widget.post.mediaType == 'image') {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.memory(
+          _mediaBytes!,
+          fit: BoxFit.cover,
+          width: double.infinity,
+        ),
+      );
+    } else if (widget.post.mediaType == 'video' && _isVideoInitialized && _videoController != null) {
       return Column(
         children: [
           ClipRRect(
@@ -835,33 +480,11 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
         ],
       );
     } else {
-      // For unknown media types, try to display as image anyway
-      return Column(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.memory(
-              _mediaBytes!,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  width: double.infinity,
-                  height: 200,
-                  color: Theme.of(context).colorScheme.surfaceVariant,
-                  child: Center(
-                    child: Text(
-                      'Unsupported media type: ${widget.post.mediaType}',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text('Unsupported media type'),
+        ),
       );
     }
   }
@@ -1028,24 +651,12 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                   const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Comments',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        // Refresh button for comments
-                        IconButton(
-                          icon: const Icon(Icons.refresh, size: 20),
-                          onPressed: _isLoading ? null : _loadComments,
-                          tooltip: 'Refresh comments',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ],
+                    child: const Text(
+                      'Comments',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1111,34 +722,13 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                     )
                   else if (_comments.isEmpty)
                     Padding(
-                      padding: const EdgeInsets.all(24.0),
+                      padding: const EdgeInsets.all(16.0),
                       child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              size: 48,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No comments yet',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Be the first to share your thoughts!',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
+                        child: Text(
+                          'No comments yet. Be the first to comment!',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     )
@@ -1154,22 +744,15 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                                 .publicKeyHash ==
                             comment.author.publicKeyHash;
 
-                        // Format the comment creation date for tooltip
-                        final formattedDate = '${comment.createdAt.day}/${comment.createdAt.month}/${comment.createdAt.year} ${comment.createdAt.hour}:${comment.createdAt.minute.toString().padLeft(2, '0')}';
-                        
                         return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               CircleAvatar(
                                 radius: 16,
-                                backgroundColor: isAuthor 
-                                  ? Theme.of(context).colorScheme.primaryContainer 
-                                  : Theme.of(context).colorScheme.secondaryContainer,
-                                foregroundColor: isAuthor
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Theme.of(context).colorScheme.onSecondaryContainer,
+                                backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                                foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
                                 child: Text(
                                   (comment.author.name?.isNotEmpty ?? false)
                                       ? comment.author.name![0].toUpperCase()
@@ -1181,62 +764,40 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                   decoration: BoxDecoration(
-                                    color: isAuthor 
-                                      ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3)
-                                      : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
                                     borderRadius: BorderRadius.circular(16),
-                                    border: isAuthor 
-                                      ? Border.all(color: Theme.of(context).colorScheme.primaryContainer, width: 1)
-                                      : null,
                                   ),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
-                                          Flexible(
-                                            child: Text(
-                                              comment.author.name ?? 'Anonymous',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
+                                          Text(
+                                            comment.author.name ?? 'Anonymous',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Tooltip(
-                                            message: formattedDate,
-                                            child: Text(
-                                              timeago.format(comment.createdAt),
-                                              style: TextStyle(
-                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                                fontSize: 12,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
+                                          Text(
+                                            timeago.format(comment.createdAt),
+                                            style: TextStyle(
+                                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                              fontSize: 12,
                                             ),
                                           ),
-                                          const Spacer(),
+                                          if (isAuthor) const Spacer(),
                                           if (isAuthor)
-                                            comment.isDeleting == true
-                                              ? SizedBox(
-                                                  width: 16,
-                                                  height: 16,
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    color: Theme.of(context).colorScheme.error,
-                                                  ),
-                                                )
-                                              : IconButton(
-                                                  icon: Icon(
-                                                    Icons.delete_outline,
-                                                    size: 18,
-                                                    color: Theme.of(context).colorScheme.error,
-                                                  ),
-                                                  onPressed: () => _deleteComment(comment),
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(),
-                                                  tooltip: 'Delete comment',
-                                                ),
+                                            IconButton(
+                                              icon: Icon(
+                                                Icons.delete_outline,
+                                                size: 18,
+                                                color: Theme.of(context).colorScheme.error,
+                                              ),
+                                              onPressed: () => _deleteComment(comment),
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                            ),
                                         ],
                                       ),
                                       const SizedBox(height: 4),

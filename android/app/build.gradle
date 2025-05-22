@@ -7,8 +7,8 @@ plugins {
 
 android {
     namespace = "com.web3universe.web3posts"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 34 // Set to a specific version that's compatible with all plugins
+    ndkVersion = "27.0.12077973" // Updated to match required NDK version
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
@@ -20,7 +20,7 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = '1.8'
     }
 
     defaultConfig {

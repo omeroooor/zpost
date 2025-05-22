@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/create_post_screen.dart';
@@ -11,16 +12,33 @@ import 'screens/user_posts_screen.dart';
 import 'screens/following_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/post_provider.dart';
+import 'providers/theme_provider.dart';
 import 'models/post.dart';
 import 'services/key_storage_service.dart';
 import 'services/api_service.dart';
 import 'services/otp_service.dart';
+import 'config/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // Initialize OTP service for deep linking
   await OTPService.init();
+  
+  // Set preferred orientations
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+  
+  // Set system UI overlay style
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+  ));
   
   runApp(
     MultiProvider(
@@ -38,6 +56,7 @@ void main() async {
           },
         ),
         ChangeNotifierProvider(create: (_) => PostProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: const MyApp(),
     ),
@@ -49,12 +68,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    
     return MaterialApp(
       title: 'Z-Post',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: themeProvider.lightTheme,
+      darkTheme: themeProvider.darkTheme,
+      themeMode: themeProvider.themeMode,
       home: Consumer<AuthProvider>(
         builder: (context, authProvider, _) {
           return authProvider.isAuthenticated

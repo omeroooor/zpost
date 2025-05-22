@@ -12,6 +12,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import './wallet_screen.dart';
 import '../models/public_key_entry.dart';
 import '../widgets/custom_snackbar.dart';
+import '../utils/responsive_layout.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,10 +21,11 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
+class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _publicKeyController = TextEditingController();
   final _otpController = TextEditingController();
+  final _otpFocusNode = FocusNode(); // Focus node for OTP input field
   bool _isLoading = false;
   bool _otpRequested = false;
   bool _isCheckingNotification = false;
@@ -34,6 +36,11 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   final AppLinks _appLinks = AppLinks();
   StreamSubscription<Uri>? _uriLinkSubscription;
   Timer? _notificationCheckTimer;
+  Timer? _notificationTimeoutTimer; // Timer for notification login timeout
+  
+  // Animation controller for the vault key icon
+  late AnimationController _keyIconAnimationController;
+  late Animation<double> _keyIconAnimation;
 
   @override
   void initState() {
@@ -42,6 +49,32 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _resetState();
     _initDeepLinks();
+    
+    // Initialize animation controller for the vault key icon
+    _keyIconAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    
+    // Create a pulse animation
+    _keyIconAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.25,
+    ).animate(CurvedAnimation(
+      parent: _keyIconAnimationController,
+      curve: Curves.easeInOut,
+    ));
+    
+    // Start periodic animation
+    Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted) {
+        _keyIconAnimationController.forward().then((_) {
+          _keyIconAnimationController.reverse();
+        });
+      } else {
+        timer.cancel();
+      }
+    });
   }
 
   @override
@@ -49,8 +82,11 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     print('Disposing login screen');
     _otpController.dispose();
     _publicKeyController.dispose();
+    _otpFocusNode.dispose(); // Dispose focus node
     _uriLinkSubscription?.cancel();
     _notificationCheckTimer?.cancel();
+    _notificationTimeoutTimer?.cancel(); // Cancel timeout timer
+    _keyIconAnimationController.dispose(); // Dispose animation controller
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -68,12 +104,14 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   void _resetState() {
     print('Resetting login state');
     _notificationCheckTimer?.cancel();
+    _notificationTimeoutTimer?.cancel(); // Cancel timeout timer
     setState(() {
       _otpController.clear();
       _error = null;
       _encryptedOtp = null;
       _isLoading = false;
       _isCheckingNotification = false;
+      _otpRequested = false;
     });
   }
 
@@ -172,15 +210,18 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openWallet() async {
-    final result = await Navigator.push<PublicKeyEntry>(
+    final selectedKey = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (context) => WalletScreen(
-          isSelectMode: true,
-          onKeySelected: _onKeySelected,
-        ),
+        builder: (context) => const WalletScreen(),
       ),
     );
+  
+    if (selectedKey != null && mounted) {
+      setState(() {
+        _publicKeyController.text = selectedKey;
+      });
+    }
   }
 
   void _onKeySelected(PublicKeyEntry key) {
@@ -218,6 +259,14 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
             _encryptedOtp = encoder.convert(formattedJson);
             _error = null;
             _isLoading = false;
+            _otpRequested = true;
+            
+            // Move focus to OTP input field
+            if (mounted) {
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _otpFocusNode.requestFocus();
+              });
+            }
           } else {
             _error = 'Invalid encrypted OTP format from server';
             _isLoading = false;
@@ -283,8 +332,9 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   Future<void> _requestOtpWithNotification() async {
     if (!_formKey.currentState!.validate()) return;
     
-    // Cancel any existing timer
+    // Cancel any existing timers
     _notificationCheckTimer?.cancel();
+    _notificationTimeoutTimer?.cancel();
     
     setState(() {
       _isLoading = true;
@@ -307,6 +357,20 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
         
         // Start polling for authorization
         _startPollingForAuthorization();
+        
+        // Set a timeout for notification-based login (2 minutes)
+        _notificationTimeoutTimer = Timer(const Duration(minutes: 2), () {
+          if (mounted && _isCheckingNotification) {
+            _notificationCheckTimer?.cancel();
+            setState(() {
+              _isCheckingNotification = false;
+              CustomSnackbar.showError(
+                context,
+                message: 'Login request timed out. Please try again.',
+              );
+            });
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -368,228 +432,515 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isWeb = ResponsiveLayout.isWeb();
+    final isDesktop = ResponsiveLayout.isDesktop(context);
+    final isMobile = ResponsiveLayout.isMobile(context);
+    
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Login'),
-      ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 48),
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+        child: isDesktop || (!isMobile && isWeb)
+            ? _buildWebLayout(context, theme, colorScheme)
+            : _buildMobileLayout(context, theme, colorScheme),
+      ),
+    );
+  }
+  
+  Widget _buildWebLayout(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
+    return Row(
+      children: [
+        // Left side - Branding and information
+        Expanded(
+          flex: 5,
+          child: Container(
+            color: colorScheme.primary,
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 40),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.account_balance_wallet,
+                        size: 48,
+                        color: colorScheme.onPrimary,
+                      ),
+                      const SizedBox(width: 16),
+                      Text(
+                        'Z-Post',
+                        style: theme.textTheme.displayMedium?.copyWith(
+                          color: colorScheme.onPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
-                  textAlign: TextAlign.center,
+                  const SizedBox(height: 24),
+                  Text(
+                    'Web3 Social Media Platform',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: colorScheme.onPrimary.withOpacity(0.9),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  Text(
+                    'Connect with your wallet',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: colorScheme.onPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'ZPost is a decentralized social media platform that puts you in control of your data and content.',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: colorScheme.onPrimary.withOpacity(0.8),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '• Secure authentication with your wallet\n• Own your content with blockchain verification\n• Earn reputation points for quality contributions\n• No centralized data collection',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: colorScheme.onPrimary.withOpacity(0.8),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    ' 2023 ZPost',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onPrimary.withOpacity(0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // Right side - Login form
+        Expanded(
+          flex: 4,
+          child: Container(
+            color: theme.scaffoldBackgroundColor,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(32.0),
+              child: _buildLoginForm(context, theme, colorScheme, isWeb: true),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildMobileLayout(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 40),
+          Center(
+            child: Column(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet,
+                  size: 48,
+                  color: colorScheme.primary,
                 ),
-                const SizedBox(height: 32),
-                
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
+                const SizedBox(height: 16),
+                Text(
+                  'Z-Post',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Web3 Social Media Platform',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 40),
+          _buildLoginForm(context, theme, colorScheme, isWeb: false),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildLoginForm(BuildContext context, ThemeData theme, ColorScheme colorScheme, {required bool isWeb}) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_error != null) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colorScheme.error.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.error_outline, color: colorScheme.error),
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: Text(
                       _error!,
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-
-                if (_encryptedOtp == null) ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Public Key',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextFormField(
-                            controller: _publicKeyController,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              hintText: 'Enter your public key',
-                              prefixIcon: Icon(Icons.key),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your public key';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton(
-                                      onPressed: _isLoading ? null : _requestOtp,
-                                      style: ElevatedButton.styleFrom(
-                                        padding: const EdgeInsets.all(16),
-                                      ),
-                                      child: _isLoading && !_isCheckingNotification
-                                          ? const SizedBox(
-                                              height: 20,
-                                              width: 20,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
-                                            )
-                                          : const Text('Request OTP'),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  ElevatedButton.icon(
-                                    onPressed: _openWallet,
-                                    icon: const Icon(Icons.account_balance_wallet),
-                                    label: const Text('Use Wallet'),
-                                    style: ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.all(16),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  onPressed: _isLoading ? null : _requestOtpWithNotification,
-                                  icon: const Icon(Icons.notifications_active),
-                                  label: _isCheckingNotification
-                                      ? Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Text('Waiting for notification '),
-                                            const SizedBox(width: 8),
-                                            const SizedBox(
-                                              height: 16,
-                                              width: 16,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
-                                            ),
-                                          ],
-                                        )
-                                      : const Text('Login with Notification'),
-                                  style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.all(16),
-                                    backgroundColor: Theme.of(context).colorScheme.secondary,
-                                    foregroundColor: Theme.of(context).colorScheme.onSecondary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ] else ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'Encrypted OTP',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              Row(
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.account_balance_wallet),
-                                    onPressed: () => _handleOtpDecryption(),
-                                    tooltip: 'Open in Wallet',
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.copy),
-                                    onPressed: _copyEncryptedOtp,
-                                    tooltip: 'Copy encrypted OTP',
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Center(
-                            child: QrImageView(
-                              data: 'otp://web3posts?otp=$_encryptedOtp&callback_scheme=web3posts',
-                              version: QrVersions.auto,
-                              size: 200.0,
-                              backgroundColor: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _otpController,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              hintText: 'Enter OTP',
-                              prefixIcon: Icon(Icons.lock),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter the OTP';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              TextButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    _encryptedOtp = null;
-                                    _otpController.clear();
-                                    _error = null;
-                                  });
-                                },
-                                icon: const Icon(Icons.arrow_back),
-                                label: const Text('Back'),
-                              ),
-                              ElevatedButton(
-                                onPressed: _isLoading ? null : _verifyOtp,
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                ),
-                                child: _isLoading
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
-                                      )
-                                    : const Text('Verify OTP'),
-                              ),
-                            ],
-                          ),
-                        ],
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.error,
                       ),
                     ),
                   ),
                 ],
-                const SizedBox(height: 24),
-              ],
+              ),
             ),
-          ),
+            const SizedBox(height: 24),
+          ],
+          if (_encryptedOtp == null) ...[
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              color: colorScheme.surface,
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Sign In',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Enter your public key hash or connect with your wallet',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    TextFormField(
+                      controller: _publicKeyController,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        labelText: 'Public Key Hash',
+                        hintText: 'Enter your public key hash',
+                        suffixIcon: ScaleTransition(
+                          scale: _keyIconAnimation,
+                          child: IconButton(
+                            icon: const Icon(Icons.vpn_key),
+                            tooltip: 'Open Vault',
+                            onPressed: _openWallet,
+                          ),
+                        ),
+                        filled: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your public key hash';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      height: 50,
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _requestOtp,
+                        style: ElevatedButton.styleFrom(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: _isLoading
+                            ? SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: colorScheme.onPrimary,
+                                ),
+                              )
+                            : Text(
+                                'Request OTP',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: colorScheme.onPrimary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 50,
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _isCheckingNotification ? null : _requestOtpWithNotification,
+                        icon: _isCheckingNotification 
+                            ? SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: colorScheme.primary,
+                                ),
+                              )
+                            : const Icon(Icons.notifications_active),
+                        label: Text(
+                          'Login with Notification',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+            // Spacer
+            const SizedBox(height: 16),
+          ],
+          if (_encryptedOtp != null) ...[
+            // OTP verification UI
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              color: colorScheme.surface,
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Verify OTP',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.qr_code_scanner, 
+                          size: 16, 
+                          color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7)
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Scan QR or enter OTP manually',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                     // QR code section
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colorScheme.primary.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // Action buttons in a row at the top
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              // Wallet button
+                              IconButton.filled(
+                                icon: Icon(Icons.account_balance_wallet, size: 20),
+                                onPressed: () => _handleOtpDecryption(),
+                                tooltip: 'Open in Wallet',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: colorScheme.primaryContainer,
+                                  foregroundColor: colorScheme.onPrimaryContainer,
+                                  minimumSize: const Size(40, 40),
+                                  padding: EdgeInsets.zero,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Copy button
+                              IconButton.filled(
+                                icon: Icon(Icons.copy, size: 20),
+                                onPressed: _copyEncryptedOtp,
+                                tooltip: 'Copy encrypted OTP',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: colorScheme.primaryContainer,
+                                  foregroundColor: colorScheme.onPrimaryContainer,
+                                  minimumSize: const Size(40, 40),
+                                  padding: EdgeInsets.zero,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          // Larger QR code with more space
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 10,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: QrImageView(
+                              // Create a properly formatted JSON object for the wallet app
+                              data: _encryptedOtp!,
+                              version: QrVersions.auto,
+                              size: 240.0, // Increased size for better scanning
+                              backgroundColor: Colors.white,
+                              errorCorrectionLevel: QrErrorCorrectLevel.H,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // OTP input field
+                    TextFormField(
+                      controller: _otpController,
+                      focusNode: _otpFocusNode, // Assign focus node
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        hintText: 'Enter OTP',
+                        labelText: 'One-Time Password',
+                        prefixIcon: const Icon(Icons.lock),
+                        filled: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter the OTP';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    // Action buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _encryptedOtp = null;
+                              _otpController.clear();
+                              _error = null;
+                            });
+                          },
+                          icon: const Icon(Icons.arrow_back),
+                          label: const Text('Back'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                        SizedBox(
+                          height: 48,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _verifyOtp,
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: _isLoading
+                                ? SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: colorScheme.onPrimary,
+                                    ),
+                                  )
+                                : Text(
+                                    'Verify OTP',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      color: colorScheme.onPrimary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildLoginOption(BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    bool isLoading = false,
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+  }) {
+    return InkWell(
+      onTap: isLoading ? null : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 120,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: colorScheme.primary.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            isLoading
+                ? SizedBox(
+                    height: 24,
+                    width: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colorScheme.primary,
+                    ),
+                  )
+                : Icon(icon, size: 32, color: colorScheme.primary),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );

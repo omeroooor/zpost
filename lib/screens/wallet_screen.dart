@@ -456,12 +456,8 @@ class _WalletScreenState extends State<WalletScreen> {
                         widget.onKeySelected?.call(key);
                         Navigator.pop(context);
                       } else {
-                        Clipboard.setData(ClipboardData(text: key.publicKey));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Public key copied to clipboard'),
-                          ),
-                        );
+                        // Return to login screen with the selected key
+                        Navigator.pop(context, key.publicKey);
                       }
                     },
                   );

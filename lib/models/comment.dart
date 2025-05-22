@@ -8,6 +8,7 @@ class Comment {
   final DateTime createdAt;
   final String postId;
   final DateTime? updatedAt;
+  final bool? isDeleting; // Flag to track if comment is being deleted
 
   Comment({
     required this.id,
@@ -16,6 +17,7 @@ class Comment {
     required this.createdAt,
     required this.postId,
     this.updatedAt,
+    this.isDeleting,
   });
 
   factory Comment.fromJson(Map<String, dynamic> json) {
@@ -56,6 +58,7 @@ class Comment {
         updatedAt: json['updatedAt'] != null 
           ? DateTime.parse(json['updatedAt'] as String)
           : null,
+        isDeleting: false, // Default value for new comments
       );
     } catch (e, stackTrace) {
       debugPrint('Error parsing comment: $e');
@@ -73,6 +76,7 @@ class Comment {
       'createdAt': createdAt.toIso8601String(),
       'post': postId,
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+      // isDeleting is not sent to the server as it's only for UI state
     };
   }
 }
