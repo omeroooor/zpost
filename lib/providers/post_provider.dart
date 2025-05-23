@@ -184,6 +184,35 @@ class PostProvider with ChangeNotifier {
       rethrow;
     }
   }
+  
+  // Fetch a single post by ID
+  Future<Post?> fetchPostById(String postId) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+      
+      final post = await ApiService.getPostById(postId);
+      if (post != null) {
+        // Check if the post is already in our lists
+        final existingPostIndex = _posts.indexWhere((p) => p.id == postId);
+        if (existingPostIndex != -1) {
+          // Update existing post
+          _posts[existingPostIndex] = post;
+        } else {
+          // Add to posts list if not already there
+          _posts.add(post);
+        }
+        notifyListeners();
+      }
+      return post;
+    } catch (e) {
+      print('Error fetching post by ID: $e');
+      return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 
   Future<Post> createDraft(String content) async {
     try {

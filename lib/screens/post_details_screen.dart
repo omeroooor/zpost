@@ -592,6 +592,29 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     );
   }
 
+  // Share the post via native sharing options
+  Future<void> _sharePost(BuildContext context) async {
+    final String postTitle = widget.post.name ?? 'Untitled Post';
+    final String authorName = widget.post.author.name ?? 'Anonymous';
+    final String postUrl = '${ApiConfig.serverBaseUrl}/posts/${widget.post.id}';
+    
+    // Create a share message with post details
+    final String shareText = 'Check out "$postTitle" by $authorName on Z-Post!\n\n$postUrl';
+    
+    // Get the position of the share button for share sheet positioning
+    final RenderBox? box = context.findRenderObject() as RenderBox?;
+    
+    // Share the post
+    await Share.share(
+      shareText,
+      subject: 'Sharing: $postTitle',
+      sharePositionOrigin: box != null 
+          ? box.localToGlobal(Offset.zero) & box.size
+          : null,
+    );
+  }
+  
+  // Export the post as a ZIP file with all content
   Future<void> _exportPost() async {
     setState(() => _isLoading = true);
     
@@ -958,10 +981,10 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                           style: FilledButton.styleFrom(
                             backgroundColor: Theme.of(context).colorScheme.primary,
                             foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           ),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 8),
                         FilledButton.icon(
                           onPressed: () => _handleVerify(context),
                           icon: const Icon(Icons.verified),
@@ -969,7 +992,18 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                           style: FilledButton.styleFrom(
                             backgroundColor: Theme.of(context).colorScheme.secondary,
                             foregroundColor: Theme.of(context).colorScheme.onSecondary,
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: () => _sharePost(context),
+                          icon: const Icon(Icons.share),
+                          label: const Text('Share'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Theme.of(context).colorScheme.tertiary,
+                            foregroundColor: Theme.of(context).colorScheme.onTertiary,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           ),
                         ),
                       ],

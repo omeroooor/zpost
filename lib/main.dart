@@ -1,22 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
-import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/create_post_screen.dart';
-import 'screens/drafts_screen.dart';
-import 'screens/edit_post_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/search_screen.dart';
-import 'screens/user_posts_screen.dart';
-import 'screens/following_screen.dart';
-import 'providers/auth_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:app_links/app_links.dart';
 import 'providers/post_provider.dart';
 import 'providers/theme_provider.dart';
-import 'models/post.dart';
-import 'services/key_storage_service.dart';
+import 'screens/create_post_screen.dart';
+import 'screens/drafts_screen.dart';
+import 'screens/following_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/profile_screen.dart';
+import 'screens/search_screen.dart';
+import 'screens/edit_post_screen.dart';
+import 'screens/user_posts_screen.dart';
 import 'services/api_service.dart';
+import 'services/key_storage_service.dart';
 import 'services/otp_service.dart';
+import 'services/deep_link_service.dart';
+import 'models/post.dart';
+import 'providers/auth_provider.dart';
 import 'config/app_theme.dart';
 
 void main() async {
@@ -63,8 +65,48 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final _deepLinkService = DeepLinkService();
+  final _appLinks = AppLinks();
+  
+  @override
+  void initState() {
+    super.initState();
+    _initializeDeepLinks();
+  }
+  
+  Future<void> _initializeDeepLinks() async {
+    // Handle deep links when app is already running
+    _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    });
+    
+    // Handle deep links when app is started from a link
+    try {
+      final initialUri = await _appLinks.getInitialAppLink();
+      if (initialUri != null) {
+        _handleDeepLink(initialUri);
+      }
+    } catch (e) {
+      debugPrint('Error getting initial deep link: $e');
+    }
+  }
+  
+  void _handleDeepLink(Uri uri) {
+    debugPrint('Deep link received: ${uri.toString()}');
+    
+    // Check if this is a post URL
+    if (uri.pathSegments.isNotEmpty && uri.pathSegments[0] == 'posts') {
+      _deepLinkService.handlePostDeepLink(uri);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +115,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Z-Post',
       debugShowCheckedModeBanner: false,
+      navigatorKey: DeepLinkService.navigatorKey,
       theme: themeProvider.lightTheme,
       darkTheme: themeProvider.darkTheme,
       themeMode: themeProvider.themeMode,

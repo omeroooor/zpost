@@ -6,9 +6,10 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
-import '../providers/auth_provider.dart';
 import '../models/supporter.dart';
+import '../models/post.dart';
 import '../config/api_config.dart';
+import '../providers/auth_provider.dart';
 
 // Custom exception for file size errors
 class FileTooLargeException implements Exception {
@@ -222,6 +223,26 @@ class ApiService {
       headers: await _getHeaders(),
     );
     return _handleListResponse(response);
+  }
+  
+  // Get a post by its ID
+  static Future<Post?> getPostById(String postId) async {
+    try {
+      // Use the proper API endpoint from ApiConfig
+      final response = await http.get(
+        Uri.parse('${ApiConfig.postsEndpoint}/$postId'),
+        headers: await _getHeaders(),
+      );
+      
+      // Log the request for debugging
+      debugPrint('Fetching post from: ${ApiConfig.postsEndpoint}/$postId');
+      
+      final data = await _handleMapResponse(response);
+      return Post.fromJson(data);
+    } catch (e) {
+      debugPrint('Error fetching post by ID: $e');
+      return null;
+    }
   }
 
   static Future<Map<String, dynamic>> getPaginatedUserPosts({
