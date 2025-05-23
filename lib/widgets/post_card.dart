@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'expandable_text.dart';
 import '../models/post.dart';
 import '../models/author.dart';
 import '../models/supporter.dart';
@@ -24,7 +25,7 @@ import '../widgets/action_button.dart';
 import '../config/api_config.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
-class PostCard extends StatelessWidget {
+class PostCard extends StatefulWidget {
   final Post post;
   final bool showAuthorName;
   final bool showAuthorImage;
@@ -49,9 +50,28 @@ class PostCard extends StatelessWidget {
     this.onVerify,
     this.onSupport,
   }) : super(key: key);
+  
+  @override
+  State<PostCard> createState() => _PostCardState();
+}
+
+class _PostCardState extends State<PostCard> {
+  bool _isExpanded = false;
+  static const int _maxLines = 3;
+  
+  // Check if text needs a "Read more" button
+  bool _needsReadMore(String text, TextStyle style, double maxWidth) {
+    final TextPainter textPainter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      maxLines: _maxLines,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    
+    return textPainter.didExceedMaxLines;
+  }
 
   void _handleSendReputation(BuildContext context) async {
-    if (post.contentHash == null) {
+    if (widget.post.contentHash == null) {
       _showErrorDialog(
         context,
         'Cannot Support Post',
@@ -76,7 +96,7 @@ class PostCard extends StatelessWidget {
         ),
       );
 
-      final cleanHash = post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
+      final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
       await DeepLinkService.launchWalletForReputation(cleanHash);
       
       // Close loading dialog
@@ -97,7 +117,7 @@ class PostCard extends StatelessWidget {
           context,
           'Support Error',
           'Unable to open wallet app. Make sure you have a compatible wallet installed.',
-          post.contentHash!.replaceAll('UR:VERIFY-POST/', ''),
+          widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', ''),
           true, // isSupport
         );
       }
@@ -105,7 +125,7 @@ class PostCard extends StatelessWidget {
   }
 
   void _handleVerify(BuildContext context) async {
-    if (post.contentHash == null) {
+    if (widget.post.contentHash == null) {
       _showErrorDialog(
         context,
         'Cannot Verify Post',
@@ -130,7 +150,7 @@ class PostCard extends StatelessWidget {
         ),
       );
 
-      final cleanHash = post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
+      final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
       await DeepLinkService.launchWalletForVerify(cleanHash);
       
       // Close loading dialog
@@ -151,7 +171,7 @@ class PostCard extends StatelessWidget {
           context,
           'Verification Error',
           'Unable to open wallet app. Make sure you have a compatible wallet installed.',
-          post.contentHash!.replaceAll('UR:VERIFY-POST/', ''),
+          widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', ''),
           false, // isSupport
         );
       }
@@ -254,11 +274,17 @@ class PostCard extends StatelessWidget {
   }
 
   Widget _buildContent(BuildContext context) {
+    final textStyle = Theme.of(context).textTheme.bodyLarge!;
+    final isArabicText = _isArabic(widget.post.content);
+    final textDirection = isArabicText ? TextDirection.rtl : TextDirection.ltr;
+    final textAlign = isArabicText ? TextAlign.right : TextAlign.left;
+    final colorScheme = Theme.of(context).colorScheme;
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Media content (image or video)
-        if (post.mediaPath != null) ...[
+        if (widget.post.mediaPath != null) ...[
           ClipRRect(
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(4),
@@ -273,14 +299,18 @@ class PostCard extends StatelessWidget {
           padding: const EdgeInsets.all(16.0),
           child: Container(
             width: double.infinity,
-            alignment: _isArabic(post.content) ? Alignment.centerRight : Alignment.centerLeft,
+            alignment: isArabicText ? Alignment.centerRight : Alignment.centerLeft,
             child: Directionality(
-              // Detect if the text is Arabic and set RTL direction accordingly
-              textDirection: _isArabic(post.content) ? TextDirection.rtl : TextDirection.ltr,
-              child: Text(
-                post.content,
-                style: Theme.of(context).textTheme.bodyLarge,
-                textAlign: _isArabic(post.content) ? TextAlign.right : TextAlign.left,
+              textDirection: textDirection,
+              child: ExpandableText(
+                text: widget.post.content,
+                style: textStyle,
+                textAlign: textAlign,
+                textDirection: textDirection,
+                maxLines: 3,
+                expandText: 'Read more',
+                collapseText: 'Show less',
+                linkColor: colorScheme.primary,
               ),
             ),
           ),
@@ -293,22 +323,22 @@ class PostCard extends StatelessWidget {
   @override
   // Helper method to detect if text is Arabic
   bool _isArabic(String text) {
-    // Check if the text contains Arabic characters
-    return RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+    // Simple check for Arabic characters in the text
+    return RegExp(r'[؀-ۿ]').hasMatch(text);
   }
   
   // Build media content with caching
   Widget _buildMediaContent(BuildContext context) {
     // Use ApiConfig to get the proper media URL
-    final String mediaUrl = ApiConfig.getMediaUrl(post.mediaPath!);
+    final String mediaUrl = ApiConfig.getMediaUrl(widget.post.mediaPath!);
     
     // For video content
-    if (post.mediaType == 'video') {
+    if (widget.post.mediaType == 'video') {
       return FutureBuilder<Uint8List>(
         future: MediaCacheService().getMediaRequired(mediaUrl).catchError((error) {
           // If primary URL fails, try alternative URL
           debugPrint('Error loading video from primary URL: $error');
-          return MediaCacheService().getMediaRequired(ApiConfig.getAlternativeMediaUrl(post.mediaPath!));
+          return MediaCacheService().getMediaRequired(ApiConfig.getAlternativeMediaUrl(widget.post.mediaPath!));
         }).catchError((error) {
           // Both URLs failed
           debugPrint('Error loading video from alternative URL: $error');
@@ -367,7 +397,7 @@ class PostCard extends StatelessWidget {
                 debugPrint('Error loading image from $url: $error');
                 // Try alternative URL if the first one fails
                 return CachedNetworkImage(
-                  imageUrl: ApiConfig.getAlternativeMediaUrl(post.mediaPath!),
+                  imageUrl: ApiConfig.getAlternativeMediaUrl(widget.post.mediaPath!),
                   fit: BoxFit.cover,
                   placeholder: (context, url) => _buildLoadingPlaceholder(),
                   errorWidget: (context, url, error) => _buildErrorWidget('Could not load image'),
@@ -420,20 +450,19 @@ class PostCard extends StatelessWidget {
     
     return ResponsiveContainer(
       maxWidth: 600, // Limit width to 600px on larger screens
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => PostDetailsScreen(post: post),
-              ),
-            );
-          },
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PostDetailsScreen(post: widget.post),
+            ),
+          );
+        },
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -442,28 +471,27 @@ class PostCard extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: Row(
                   children: [
-                    if (showAuthorImage) ...[  
+                    if (widget.showAuthorImage) ...[  
                       GestureDetector(
                         onTap: () {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (context) => UserProfileScreen(
-                                publicKeyHash: post.author.publicKeyHash,
-                                name: post.author.name,
+                                publicKeyHash: widget.post.author.publicKeyHash,
+                                name: widget.post.author.name,
                               ),
                             ),
                           );
                         },
                         child: Hero(
-                          tag: 'profile-${post.author.publicKeyHash}',
+                          tag: 'profile-${widget.post.author.publicKeyHash}',
                           child: CircleAvatar(
-                            radius: 24,
-                            backgroundColor: colorScheme.primary.withOpacity(0.1),
-                            backgroundImage: post.author.image != null
-                                ? MemoryImage(base64Decode(post.author.image!))
+                            radius: 20,
+                            backgroundImage: widget.post.author.image != null
+                                ? MemoryImage(base64Decode(widget.post.author.image!))
                                 : null,
-                            child: post.author.image == null
+                            child: widget.post.author.image == null
                                 ? Icon(Icons.person, color: colorScheme.primary)
                                 : null,
                           ),
@@ -472,49 +500,52 @@ class PostCard extends StatelessWidget {
                       const SizedBox(width: 12),
                     ],
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => UserProfileScreen(
-                                    publicKeyHash: post.author.publicKeyHash,
-                                    name: post.author.name,
-                                  ),
-                                ),
-                              );
-                            },
-                            child: Text(
-                              post.author.name ?? 'Anonymous',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => UserProfileScreen(
+                                publicKeyHash: widget.post.author.publicKeyHash,
+                                name: widget.post.author.name,
                               ),
                             ),
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.post.author.name ?? 'Anonymous',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                timeago.format(widget.post.createdAt),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            timeago.format(post.createdAt),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
-                    if (post.contentHash != null)
+                    if (widget.post.contentHash != null)
                       IconButton(
                         icon: Icon(Icons.qr_code, color: colorScheme.primary),
                         tooltip: 'Show QR Code',
                         onPressed: () => _showQRDialog(
                           context,
                           'Post Actions',
-                          post.contentHash!,
+                          widget.post.contentHash!,
                         ),
                       ),
-                    if (post.isConfirmed)
+                    if (widget.post.isConfirmed)
                       Padding(
                         padding: const EdgeInsets.only(left: 4),
                         child: Tooltip(
@@ -556,10 +587,10 @@ class PostCard extends StatelessWidget {
                     ),
                     ActionButton(
                       icon: Icons.people_outline,
-                      label: '${post.supporterCount}',
+                      label: '${widget.post.supporterCount}',
                       onTap: () {
-                        if (post.contentHash != null) {
-                          final cleanHash = post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
+                        if (widget.post.contentHash != null) {
+                          final cleanHash = widget.post.contentHash!.replaceAll('UR:VERIFY-POST/', '');
                           showSupportersDialog(context, cleanHash);
                         } else {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -571,21 +602,21 @@ class PostCard extends StatelessWidget {
                     ),
                     ActionButton(
                       icon: Icons.star_outline,
-                      label: '${post.reputationPoints}',
+                      label: '${widget.post.reputationPoints}',
                       onTap: null, // Just display the count
                       color: Colors.amber,
                     ),
-                    if (showActions) ...[
+                    if (widget.showActions) ...[
                       ActionButton(
                         icon: Icons.edit,
                         label: 'Edit',
-                        onTap: onEdit,
+                        onTap: widget.onEdit,
                         color: colorScheme.primary,
                       ),
                       ActionButton(
                         icon: Icons.delete,
                         label: 'Delete',
-                        onTap: onDelete,
+                        onTap: widget.onDelete,
                         color: colorScheme.error,
                       ),
                     ],

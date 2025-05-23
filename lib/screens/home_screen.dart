@@ -25,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasMore = true;
   String _sortBy = 'date_desc';
   String? _filter;
-  bool _followedOnly = true;
+  bool _followedOnly = false; // Changed to false to show public posts by default
 
   @override
   void initState() {

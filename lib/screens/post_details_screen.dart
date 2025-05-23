@@ -594,7 +594,29 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
 
   // Share the post via native sharing options
   Future<void> _sharePost(BuildContext context) async {
-    final String postTitle = widget.post.name ?? 'Untitled Post';
+    // Generate a post title from the content if no name is provided
+    String postTitle;
+    if (widget.post.name != null && widget.post.name!.isNotEmpty) {
+      postTitle = widget.post.name!;
+    } else {
+      // Extract first few words from the post content
+      final String content = widget.post.content.trim();
+      final List<String> words = content.split(' ');
+      
+      if (words.length <= 5) {
+        // If post is very short, use all of it
+        postTitle = content;
+      } else {
+        // Otherwise use first 5 words with ellipsis
+        postTitle = '${words.take(5).join(' ')}...';
+      }
+      
+      // Limit the title length to 50 characters
+      if (postTitle.length > 50) {
+        postTitle = '${postTitle.substring(0, 47)}...';
+      }
+    }
+    
     final String authorName = widget.post.author.name ?? 'Anonymous';
     final String postUrl = '${ApiConfig.serverBaseUrl}/posts/${widget.post.id}';
     
