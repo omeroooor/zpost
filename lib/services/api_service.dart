@@ -6,6 +6,8 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/supporter.dart';
 import '../models/post.dart';
 import '../config/api_config.dart';
@@ -199,6 +201,177 @@ class ApiService {
     print('Profile update response body: ${response.body}');
 
     return _handleMapResponse(response);
+  }
+
+  // Update profile with file upload instead of base64
+  static Future<Map<String, dynamic>> updateProfileWithFile(String name, dynamic imageFile) async {
+    debugPrint('=== PROFILE UPDATE WITH FILE ===');
+    debugPrint('Name: $name');
+    debugPrint('Image file provided: ${imageFile != null}');
+    debugPrint('Platform: ${kIsWeb ? 'Web' : 'Native'}');
+    
+    // Get authorization token
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    debugPrint('Token available: ${token != null}');
+    
+    // Create multipart request
+    final uri = Uri.parse('$baseUrl/profiles');
+    debugPrint('Request URL: $uri');
+    
+    final request = http.MultipartRequest('PUT', uri);
+    
+    // Add authorization header
+    request.headers.addAll({
+      'Authorization': token != null ? 'Bearer $token' : '',
+      'Accept': 'application/json',
+    });
+    debugPrint('Request headers: ${request.headers}');
+    
+    // Add name field
+    request.fields['name'] = name;
+    debugPrint('Added name field: $name');
+    
+    // Add image file if provided
+    if (imageFile != null) {
+      try {
+        if (kIsWeb) {
+          // Web platform handling
+          debugPrint('Handling image for web platform');
+          
+          // For web, imageFile could be XFile from image_picker
+          if (imageFile is XFile) {
+            final bytes = await imageFile.readAsBytes();
+            final fileSize = bytes.length;
+            final fileName = imageFile.name;
+            final fileExtension = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : 'jpg';
+            
+            debugPrint('Web image file details:');
+            debugPrint('- Name: $fileName');
+            debugPrint('- Size: ${fileSize ~/ 1024} KB');
+            debugPrint('- Extension: $fileExtension');
+            
+            // Determine content type based on extension
+            String mimeType = 'image/jpeg'; // Default
+            if (fileExtension == 'png') {
+              mimeType = 'image/png';
+            } else if (fileExtension == 'gif') {
+              mimeType = 'image/gif';
+            } else if (fileExtension == 'webp') {
+              mimeType = 'image/webp';
+            }
+            
+            debugPrint('Using MIME type: $mimeType');
+            
+            // Create a MultipartFile from bytes for web
+            final file = http.MultipartFile.fromBytes(
+              'image', // Field name expected by the server
+              bytes,
+              filename: fileName,
+              contentType: MediaType.parse(mimeType),
+            );
+            
+            request.files.add(file);
+            debugPrint('Added web file to request with field name: image');
+          } else {
+            throw Exception('Unsupported file type for web: ${imageFile.runtimeType}');
+          }
+        } else {
+          // Native platform handling (Android/iOS)
+          if (imageFile is File) {
+            final fileStats = await imageFile.stat();
+            final fileSize = fileStats.size;
+            final fileName = imageFile.path.split('/').last;
+            final fileExtension = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : 'jpg';
+            
+            debugPrint('Native image file details:');
+            debugPrint('- Path: ${imageFile.path}');
+            debugPrint('- Name: $fileName');
+            debugPrint('- Size: ${fileSize ~/ 1024} KB');
+            debugPrint('- Extension: $fileExtension');
+            
+            // Determine content type based on extension
+            String mimeType = 'image/jpeg'; // Default
+            if (fileExtension == 'png') {
+              mimeType = 'image/png';
+            } else if (fileExtension == 'gif') {
+              mimeType = 'image/gif';
+            } else if (fileExtension == 'webp') {
+              mimeType = 'image/webp';
+            }
+            
+            debugPrint('Using MIME type: $mimeType');
+            
+            // Add the file to the request with the correct field name
+            final file = await http.MultipartFile.fromPath(
+              'image', // Field name expected by the server
+              imageFile.path,
+              contentType: MediaType.parse(mimeType),
+            );
+            
+            request.files.add(file);
+            debugPrint('Added native file to request with field name: image');
+          } else if (imageFile is XFile) {
+            // Handle XFile for native platforms if needed
+            final fileSize = await imageFile.length();
+            final fileName = imageFile.name;
+            final fileExtension = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : 'jpg';
+            
+            debugPrint('Native XFile details:');
+            debugPrint('- Path: ${imageFile.path}');
+            debugPrint('- Name: $fileName');
+            debugPrint('- Size: ${fileSize ~/ 1024} KB');
+            debugPrint('- Extension: $fileExtension');
+            
+            // Determine content type based on extension
+            String mimeType = 'image/jpeg'; // Default
+            if (fileExtension == 'png') {
+              mimeType = 'image/png';
+            } else if (fileExtension == 'gif') {
+              mimeType = 'image/gif';
+            } else if (fileExtension == 'webp') {
+              mimeType = 'image/webp';
+            }
+            
+            debugPrint('Using MIME type: $mimeType');
+            
+            // Add the file to the request with the correct field name
+            final file = await http.MultipartFile.fromPath(
+              'image', // Field name expected by the server
+              imageFile.path,
+              contentType: MediaType.parse(mimeType),
+            );
+            
+            request.files.add(file);
+            debugPrint('Added XFile to request with field name: image');
+          } else {
+            throw Exception('Unsupported file type: ${imageFile.runtimeType}');
+          }
+        }
+      } catch (e) {
+        debugPrint('Error preparing image file: $e');
+        rethrow;
+      }
+    }
+    
+    debugPrint('Fields in request: ${request.fields}');
+    debugPrint('Files in request: ${request.files.length}');
+    
+    try {
+      debugPrint('Sending multipart request...');
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      
+      debugPrint('Profile update response:');
+      debugPrint('- Status code: ${response.statusCode}');
+      debugPrint('- Response headers: ${response.headers}');
+      debugPrint('- Response body: ${response.body}');
+      
+      return _handleMapResponse(response);
+    } catch (e) {
+      debugPrint('Error sending profile update request: $e');
+      rethrow;
+    }
   }
 
   static Future<List<dynamic>> getPosts() async {

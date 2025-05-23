@@ -131,23 +131,38 @@ class SupportersDialog extends StatelessWidget {
                     final formattedRp = _formatReputation(supporter.sentRp);
                     Widget avatar;
                     
-                    if (supporter.image != null) {
-                      try {
+                    if (supporter.image != null && supporter.image!.isNotEmpty) {
+                      // Check if it's a URL
+                      if (supporter.image!.startsWith('http://') || supporter.image!.startsWith('https://')) {
+                        debugPrint('Using NetworkImage for supporter');
                         avatar = CircleAvatar(
                           radius: 24,
                           backgroundColor: colorScheme.primary.withOpacity(0.1),
-                          backgroundImage: MemoryImage(
-                            base64Decode(supporter.image!),
-                          ),
+                          backgroundImage: NetworkImage(supporter.image!),
+                          onBackgroundImageError: (_, __) {
+                            debugPrint('Error loading supporter image URL');
+                            return null;
+                          },
                         );
-                      } catch (e) {
-                        // If image decoding fails, use the default avatar
-                        debugPrint('Error decoding supporter image: $e');
-                        avatar = CircleAvatar(
-                          radius: 24,
-                          backgroundColor: colorScheme.primary.withOpacity(0.1),
-                          child: Icon(Icons.person, color: colorScheme.primary),
-                        );
+                      } else {
+                        // Try to decode as base64
+                        try {
+                          avatar = CircleAvatar(
+                            radius: 24,
+                            backgroundColor: colorScheme.primary.withOpacity(0.1),
+                            backgroundImage: MemoryImage(
+                              base64Decode(supporter.image!),
+                            ),
+                          );
+                        } catch (e) {
+                          // If image decoding fails, use the default avatar
+                          debugPrint('Error decoding supporter image: $e');
+                          avatar = CircleAvatar(
+                            radius: 24,
+                            backgroundColor: colorScheme.primary.withOpacity(0.1),
+                            child: Icon(Icons.person, color: colorScheme.primary),
+                          );
+                        }
                       }
                     } else {
                       avatar = CircleAvatar(

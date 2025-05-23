@@ -1,11 +1,32 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
+  
+  // Helper method to handle different types of profile images
+  ImageProvider? _getProfileImage(String? imageData) {
+    if (imageData == null || imageData.isEmpty) {
+      return null;
+    }
+    
+    // Check if the image is a URL
+    if (imageData.startsWith('http://') || imageData.startsWith('https://')) {
+      return NetworkImage(imageData);
+    }
+    
+    // Try to decode as base64
+    try {
+      return MemoryImage(base64Decode(imageData));
+    } catch (e) {
+      debugPrint('Error decoding profile image: $e');
+      return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,9 +45,8 @@ class AppDrawer extends StatelessWidget {
                   children: [
                     CircleAvatar(
                       radius: 30,
-                      backgroundImage: authProvider.profileImage != null
-                          ? MemoryImage(base64Decode(authProvider.profileImage!))
-                          : null,
+                      backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                      backgroundImage: _getProfileImage(authProvider.profileImage),
                       child: authProvider.profileImage == null
                           ? const Icon(Icons.person, size: 30)
                           : null,

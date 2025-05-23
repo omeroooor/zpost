@@ -134,17 +134,35 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Widget _buildProfileImage(String? profileImage) {
-    if (profileImage == null) {
+    if (profileImage == null || profileImage.isEmpty) {
       return const CircleAvatar(
         radius: 50,
-        child: Icon(Icons.person, size: 50),
+        backgroundColor: Colors.grey,
+        child: Icon(Icons.person, size: 50, color: Colors.white),
       );
     }
 
+    // Check if the image is a URL
+    if (profileImage.startsWith('http://') || profileImage.startsWith('https://')) {
+      debugPrint('Using NetworkImage for profile: $profileImage');
+      return CircleAvatar(
+        radius: 50,
+        backgroundColor: Colors.grey.withOpacity(0.3),
+        backgroundImage: NetworkImage(profileImage),
+        onBackgroundImageError: (_, __) {
+          debugPrint('Error loading profile image URL');
+          return null;
+        },
+      );
+    }
+    
+    // Try to decode as base64
     try {
+      debugPrint('Trying to decode base64 image, length: ${profileImage.length}');
       final imageBytes = base64Decode(profileImage);
       return CircleAvatar(
         radius: 50,
+        backgroundColor: Colors.grey.withOpacity(0.3),
         backgroundImage: MemoryImage(imageBytes),
         onBackgroundImageError: (_, __) {
           debugPrint('Error loading profile image');
@@ -153,9 +171,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       );
     } catch (e) {
       debugPrint('Error decoding profile image: $e');
-      return const CircleAvatar(
+      return CircleAvatar(
         radius: 50,
-        child: Icon(Icons.person, size: 50),
+        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+        child: Icon(Icons.person, size: 50, color: Theme.of(context).colorScheme.primary),
       );
     }
   }

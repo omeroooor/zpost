@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -47,17 +48,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileImage(AuthProvider auth) {
-    if (auth.profileImage == null) {
-      return const CircleAvatar(
+    if (auth.profileImage == null || auth.profileImage!.isEmpty) {
+      return CircleAvatar(
         radius: 50,
-        child: Icon(Icons.person, size: 50),
+        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+        child: Icon(Icons.person, size: 50, color: Theme.of(context).colorScheme.primary),
       );
     }
 
+    // Check if the image is a URL
+    if (auth.profileImage!.startsWith('http://') || auth.profileImage!.startsWith('https://')) {
+      debugPrint('Using NetworkImage for profile: ${auth.profileImage}');
+      return CircleAvatar(
+        radius: 50,
+        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+        backgroundImage: NetworkImage(auth.profileImage!),
+        onBackgroundImageError: (_, __) {
+          debugPrint('Error loading profile image URL');
+          return null;
+        },
+      );
+    }
+    
+    // Try to decode as base64
     try {
+      debugPrint('Trying to decode base64 image, length: ${auth.profileImage!.length}');
       final imageBytes = base64Decode(auth.profileImage!);
       return CircleAvatar(
         radius: 50,
+        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
         backgroundImage: MemoryImage(imageBytes),
         onBackgroundImageError: (_, __) {
           debugPrint('Error loading profile image');
@@ -66,9 +85,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     } catch (e) {
       debugPrint('Error decoding profile image: $e');
-      return const CircleAvatar(
+      return CircleAvatar(
         radius: 50,
-        child: Icon(Icons.person, size: 50),
+        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+        child: Icon(Icons.person, size: 50, color: Theme.of(context).colorScheme.primary),
       );
     }
   }
@@ -77,27 +97,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final image = await ImagePicker().pickImage(
         source: ImageSource.gallery,
-        maxWidth: 300,
-        maxHeight: 300,
-        imageQuality: 85,
+        // Let the server handle resizing and compression
+        // We'll just get the original image
       );
       if (image == null) return;
 
       setState(() => _isLoading = true);
-
-      final imageBytes = await File(image.path).readAsBytes();
-      final compressedBytes = await FlutterImageCompress.compressWithList(
-        imageBytes,
-        minHeight: 300,
-        minWidth: 300,
-        quality: 85,
-      );
-
-      final base64Image = base64Encode(compressedBytes);
-      await context.read<AuthProvider>().updateProfile(
-        _nameController.text,
-        base64Image,
-      );
+      
+      if (kIsWeb) {
+        // For web, we pass the XFile directly
+        debugPrint('Web platform detected, using XFile directly');
+        
+        // Get file size for logging
+        final fileSize = await image.length();
+        debugPrint('Selected web image file size: ${fileSize ~/ 1024} KB');
+        
+        // Use the file-based update method with XFile for web
+        await context.read<AuthProvider>().updateProfileWithFile(
+          _nameController.text,
+          image, // Pass XFile directly for web
+        );
+      } else {
+        // For mobile platforms, create a File object
+        debugPrint('Native platform detected, creating File object');
+        final imageFile = File(image.path);
+        
+        // Get file size for logging
+        final fileSize = await imageFile.length();
+        debugPrint('Selected native image file size: ${fileSize ~/ 1024} KB');
+        
+        // Use the file-based update method with File for native
+        await context.read<AuthProvider>().updateProfileWithFile(
+          _nameController.text,
+          imageFile,
+        );
+      }
 
       if (mounted) {
         CustomSnackbar.show(

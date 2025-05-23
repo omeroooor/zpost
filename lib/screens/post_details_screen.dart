@@ -67,6 +67,60 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     });
   }
   
+  // Helper method to get the author's profile image
+  ImageProvider? _getAuthorImage(Author author) {
+    // First try the profileImage field
+    if (author.profileImage != null && author.profileImage!.isNotEmpty) {
+      // Check if it's a URL
+      if (author.profileImage!.startsWith('http://') || author.profileImage!.startsWith('https://')) {
+        debugPrint('Using NetworkImage for author profile');
+        return NetworkImage(author.profileImage!);
+      }
+      
+      // Try to decode as base64
+      try {
+        return MemoryImage(base64Decode(author.profileImage!));
+      } catch (e) {
+        debugPrint('Error decoding profileImage: $e');
+      }
+    }
+    
+    // Then try the image field
+    if (author.image != null && author.image!.isNotEmpty) {
+      // Check if it's a URL
+      if (author.image!.startsWith('http://') || author.image!.startsWith('https://')) {
+        debugPrint('Using NetworkImage for author image');
+        return NetworkImage(author.image!);
+      }
+      
+      // Try to decode as base64
+      try {
+        return MemoryImage(base64Decode(author.image!));
+      } catch (e) {
+        debugPrint('Error decoding image: $e');
+      }
+    }
+    
+    // No valid image found
+    return null;
+  }
+  
+  // Helper method to check if we should show the default avatar icon
+  bool _shouldShowDefaultAvatar(Author author) {
+    // Check if profileImage exists and is valid
+    if (author.profileImage != null && author.profileImage!.isNotEmpty) {
+      return false;
+    }
+    
+    // Check if image exists and is valid
+    if (author.image != null && author.image!.isNotEmpty) {
+      return false;
+    }
+    
+    // No valid image found
+    return true;
+  }
+
   Future<void> _loadSupporters() async {
     if (widget.post.contentHash == null) return;
     
@@ -956,11 +1010,10 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                         );
                       },
                       child: CircleAvatar(
-                        backgroundImage: widget.post.author.image != null
-                            ? MemoryImage(base64Decode(widget.post.author.image!))
-                            : null,
-                        child: widget.post.author.image == null
-                            ? const Icon(Icons.person)
+                        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                        backgroundImage: _getAuthorImage(widget.post.author),
+                        child: _shouldShowDefaultAvatar(widget.post.author)
+                            ? Icon(Icons.person, color: Theme.of(context).colorScheme.primary)
                             : null,
                       ),
                     ),

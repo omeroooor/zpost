@@ -327,6 +327,50 @@ class _PostCardState extends State<PostCard> {
     return RegExp(r'[؀-ۿ]').hasMatch(text);
   }
   
+  // Helper method to get the author's profile image
+  ImageProvider? _getAuthorImage(Author author) {
+    // First try the profileImage field
+    if (author.profileImage != null && author.profileImage!.isNotEmpty) {
+      // Check if it's a URL
+      if (author.profileImage!.startsWith('http://') || author.profileImage!.startsWith('https://')) {
+        debugPrint('Using NetworkImage for author profile');
+        return NetworkImage(author.profileImage!);
+      }
+      
+      // Try to decode as base64
+      try {
+        return MemoryImage(base64Decode(author.profileImage!));
+      } catch (e) {
+        debugPrint('Error decoding profileImage: $e');
+      }
+    }
+    
+    // Then try the image field
+    if (author.image != null && author.image!.isNotEmpty) {
+      // Check if it's a URL
+      if (author.image!.startsWith('http://') || author.image!.startsWith('https://')) {
+        debugPrint('Using NetworkImage for author image');
+        return NetworkImage(author.image!);
+      }
+      
+      // Try to decode as base64
+      try {
+        return MemoryImage(base64Decode(author.image!));
+      } catch (e) {
+        debugPrint('Error decoding image: $e');
+      }
+    }
+    
+    // No valid image found
+    return null;
+  }
+  
+  // Helper method to check if we should show the default avatar icon
+  bool _shouldShowDefaultAvatar(Author author) {
+    return (author.profileImage == null || author.profileImage!.isEmpty) && 
+           (author.image == null || author.image!.isEmpty);
+  }
+  
   // Build media content with caching
   Widget _buildMediaContent(BuildContext context) {
     // Use ApiConfig to get the proper media URL
@@ -487,11 +531,10 @@ class _PostCardState extends State<PostCard> {
                         child: Hero(
                           tag: 'profile-${widget.post.author.publicKeyHash}',
                           child: CircleAvatar(
-                            radius: 20,
-                            backgroundImage: widget.post.author.image != null
-                                ? MemoryImage(base64Decode(widget.post.author.image!))
-                                : null,
-                            child: widget.post.author.image == null
+                            radius: 24,
+                            backgroundColor: colorScheme.primary.withOpacity(0.1),
+                            backgroundImage: _getAuthorImage(widget.post.author),
+                            child: _shouldShowDefaultAvatar(widget.post.author)
                                 ? Icon(Icons.person, color: colorScheme.primary)
                                 : null,
                           ),

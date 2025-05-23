@@ -5,7 +5,7 @@ class ApiConfig {
   static const String prodUrl = 'https://zpost.kbunet.net/api';
   
   // Set the active base URL here
-  static const String baseUrl = prodUrl;
+  static const String baseUrl = prodUrl; // Temporarily using dev environment for testing
   
   // Server base URLs (without /api path)
   static String get localServerBase => 'http://localhost:3050';
